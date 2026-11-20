@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "yc-hack-horses",
+    "slug": "yc-hack-horses",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ychh",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ru.cu3rd.ychackhorses"
+    },
+    "android": {
+      "package": "ru.cu3rd.ychackhorses"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Приложению нужен доступ к фото для привязки снимка к наблюдению."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "goCore": {
+        "note": "Нативный модуль YcMobileCore поставляется gomobile-сборкой (backend/cmd/mobilebind). Без неё приложение работает в режиме REST-ноды."
+      }
+    }
+  }
+}
