@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
 
@@ -24,6 +25,9 @@ type Deps struct {
 	NodeID     string
 	RoleHint   string
 	AppVersion string
+	// Engine — локальный CV-движок (ADR-0012); nil = UnavailableEngine:
+	// приложение не блокируется, признаки вводит человек.
+	Engine inference.InferenceEngine
 	// Clock подменяется в тестах; nil = time.Now.
 	Clock func() time.Time
 }
@@ -35,6 +39,9 @@ func NewRouter(d Deps) http.Handler {
 	}
 	if d.Hub == nil {
 		d.Hub = NewHub()
+	}
+	if d.Engine == nil {
+		d.Engine = inference.NewUnavailable() // ADR-0012: без модели приложение не блокируется
 	}
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -57,6 +64,11 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/blobs", uploadBlob(d))
 		v1.Get("/blobs", listBlobs(d))
 		v1.Get("/blobs/{sha256}", getBlob(d))
+
+		// CV-inference (ADR-0012): предсказание, подтверждение человеком, поиск похожих.
+		v1.Post("/inference/traits", postInferenceTraits(d))
+		v1.Patch("/trait_snapshots/{id}", patchTraitSnapshot(d))
+		v1.Get("/inference/similar", getSimilarTraits(d))
 
 		v1.Get("/node", nodeInfo(d))
 		v1.Get("/events", streamEvents(d))

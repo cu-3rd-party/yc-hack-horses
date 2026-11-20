@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -50,6 +51,7 @@ func TestMain(m *testing.M) {
 		NodeID:     cfg.Node.ID,
 		RoleHint:   cfg.Node.RoleHint,
 		AppVersion: cfg.AppVersion,
+		Engine:     inference.NewReference(blobs), // baseline-движок для интеграционных тестов ADR-0012
 	})
 	code := m.Run()
 	_ = store.Close()
