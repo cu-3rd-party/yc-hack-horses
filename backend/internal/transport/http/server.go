@@ -30,6 +30,9 @@ type Deps struct {
 	Engine inference.InferenceEngine
 	// Clock подменяется в тестах; nil = time.Now.
 	Clock func() time.Time
+	// SyncStats — снапшот счётчиков sync-движка (events_sent/received/last_sync_at
+	// по каждому пиру); nil, если sync-цикл не запущен. Отдаётся на /api/v1/node.
+	SyncStats func() any
 }
 
 // NewRouter собирает chi-роутер со всеми маршрутами v1.

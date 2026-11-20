@@ -1,4 +1,13 @@
 // Package app: сборка и жизненный цикл ноды (storage + transport + graceful shutdown).
+//
+// Запуск (cmd/node web):
+//   - HTTP REST/WS на network.listen_addr;
+//   - gRPC-сервер sync на network.grpc_listen_addr (mTLS из security.* при
+//     сконфигурированных сертификатах; иначе plain — только loopback, см. grpc.go);
+//   - sync-цикл движка internal/sync по конфигу sync.enabled/interval:
+//     статические пиры (sync.peers), discovery-кандидаты (network.mdns_enabled)
+//     и central (sync.central_url, с VerifyCentralIdentity);
+//   - mDNS-анонс своей ноды и поиск пиров (internal/transport/discovery).
 package app
 
 import (
@@ -7,16 +16,22 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
+	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/transport/discovery"
 	httpapi "github.com/cu3rd/yc-hack-horses/backend/internal/transport/http"
+
+	"google.golang.org/grpc"
 )
 
 // App — собранная нода.
@@ -26,9 +41,24 @@ type App struct {
 	blobs *fsblob.Store
 	hub   *httpapi.Hub
 	srv   *http.Server
+
+	nodeID string
+	engine *syncengine.Engine
+	pstore *projectedStore
+	sync   *syncRuntime
+
+	grpcSrv *grpc.Server
+	grpcLn  net.Listener
+
+	announcer *discovery.Announcer
+	// bg хранит функции остановки фоновых контуров (sync, discovery, gRPC).
+	mu    sync.Mutex
+	bg    []func()
+	doneW sync.WaitGroup
 }
 
-// New открывает хранилище, применяет миграции и собирает HTTP-сервер.
+// New открывает хранилище, применяет миграции и собирает все компоненты ноды.
+// Слушающие сокеты не открываются — их открывает Run (см. startGRPC).
 func New(cfg *config.Config) (*App, error) {
 	if err := os.MkdirAll(cfg.Node.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("app: mkdir data dir: %w", err)
@@ -38,34 +68,72 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	if err := migrate.Apply(context.Background(), store.DB(), migrationsDir(cfg), cfg.Storage.Driver); err != nil {
-		store.Close()
+		store.Close() //nolint:errcheck // ошибка миграции важнее
 		return nil, err
 	}
 	blobs, err := fsblob.New(filepath.Join(cfg.Node.DataDir, "blobs"))
 	if err != nil {
-		store.Close()
+		store.Close() //nolint:errcheck // ошибка сборки важнее
 		return nil, err
 	}
 	nodeID, err := loadOrCreateNodeID(cfg)
 	if err != nil {
-		store.Close()
+		store.Close() //nolint:errcheck // ошибка сборки важнее
 		return nil, err
 	}
-	hub := httpapi.NewHub()
+	if err := validateGRPCListenAddr(cfg); err != nil {
+		store.Close() //nolint:errcheck // ошибка сборки важнее
+		return nil, err
+	}
+
+	identity := syncengine.NodeIdentity{
+		NodeID:     nodeID,
+		Role:       cfg.Node.RoleHint,
+		AppVersion: cfg.AppVersion,
+	}
+	// Движок пишет удалённые события через projectedStore: Append + проекции
+	// в одной транзакции (локальные события проектируются HTTP-хендлерами).
+	pstore := newProjectedStore(store)
+	engine := syncengine.NewEngine(pstore, blobs, identity, syncengine.Config{
+		BatchLimit: cfg.Sync.BatchSize,
+		KnownBlobHashes: func(ctx context.Context) ([]string, error) {
+			return blobHashes(ctx, store)
+		},
+	}, slog.Default())
+
+	a := &App{cfg: cfg, store: store, blobs: blobs, nodeID: nodeID, engine: engine, pstore: pstore}
+	a.sync = newSyncRuntime(cfg, engine, identity, slog.Default())
+	a.hub = httpapi.NewHub()
+	a.sync.setStatsPublisher(func(stats []PeerStats) { a.publishSyncStats(stats) })
+
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:      store,
 		Blobs:      blobs,
-		Hub:        hub,
+		Hub:        a.hub,
 		NodeID:     nodeID,
 		RoleHint:   cfg.Node.RoleHint,
 		AppVersion: cfg.AppVersion,
+		SyncStats:  a.syncStatsSnapshot,
 	})
-	srv := &http.Server{
+	a.srv = &http.Server{
 		Addr:              cfg.Network.ListenAddr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return &App{cfg: cfg, store: store, blobs: blobs, hub: hub, srv: srv}, nil
+	return a, nil
+}
+
+// blobHashes — источник хэшей blobs для blob-синхронизации движка.
+func blobHashes(ctx context.Context, store *sqlstore.Store) ([]string, error) {
+	bs, err := store.ListBlobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, b.SHA256)
+	}
+	return out, nil
 }
 
 // migrationsDir ищет каталог migrations/ рядом с бинарником и в рабочей директории.
@@ -113,7 +181,8 @@ func loadOrCreateNodeID(cfg *config.Config) (string, error) {
 	return id, nil
 }
 
-// Run запускает HTTP-сервер и останавливает его по отмене ctx (SIGINT/SIGTERM в cmd).
+// Run запускает все контуры ноды и останавливает их по отмене ctx
+// (SIGINT/SIGTERM в cmd). HTTP и gRPC слушают в отдельных горутинах.
 func (a *App) Run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -121,9 +190,36 @@ func (a *App) Run(ctx context.Context) error {
 		errCh <- a.srv.ListenAndServe()
 	}()
 
+	if err := a.startGRPC(); err != nil {
+		_ = a.srv.Close()
+		return err
+	}
+	if a.cfg.Sync.Enabled {
+		// central — исходящий sync: адрес из sync.central_url, доверие по
+		// VerifyCentralIdentity (hostname + серверный серт), см. sync.go.
+		if a.cfg.Sync.CentralURL != "" {
+			a.sync.addCentral(centralDialAddr(a.cfg.Sync.CentralURL))
+		}
+		syncCtx, cancel := context.WithCancel(context.Background())
+		a.addStop(cancel)
+		a.doneW.Add(1)
+		go func() {
+			defer a.doneW.Done()
+			a.sync.runLoop(syncCtx)
+		}()
+		slog.Info("sync loop started", "interval", a.cfg.Sync.Interval.String(),
+			"central_url", a.cfg.Sync.CentralURL, "static_peers", len(a.cfg.Sync.Peers))
+	}
+	if a.cfg.Network.MdnsEnabled {
+		if err := a.startDiscovery(); err != nil {
+			slog.Warn("mdns discovery disabled", "err", err)
+		}
+	}
+
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, http.ErrServerClosed) {
+			a.stopBackground()
 			return err
 		}
 		return nil
@@ -138,11 +234,123 @@ func (a *App) Run(ctx context.Context) error {
 	if err := <-errCh; !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
+	a.stopBackground()
 	if err := a.store.Close(); err != nil {
 		return fmt.Errorf("app: close storage: %w", err)
 	}
 	slog.Info("node stopped")
 	return nil
+}
+
+// addStop регистрирует функцию остановки фонового контура.
+func (a *App) addStop(fn func()) {
+	a.mu.Lock()
+	a.bg = append(a.bg, fn)
+	a.mu.Unlock()
+}
+
+func (a *App) stopBackground() {
+	a.mu.Lock()
+	bgs := a.bg
+	a.bg = nil
+	a.mu.Unlock()
+	for _, fn := range bgs {
+		fn()
+	}
+}
+
+// startGRPC открывает сокет network.grpc_listen_addr и запускает SyncService.
+func (a *App) startGRPC() error {
+	grpcSrv, err := newGRPCServer(a.cfg, syncengine.NodeIdentity{
+		NodeID:     a.nodeID,
+		Role:       a.cfg.Node.RoleHint,
+		AppVersion: a.cfg.AppVersion,
+	}, a.pstore, a.blobs, slog.Default())
+	if err != nil {
+		return err
+	}
+	ln, err := net.Listen("tcp", a.cfg.Network.GRPCListenAddr)
+	if err != nil {
+		return fmt.Errorf("app: grpc listen %s: %w", a.cfg.Network.GRPCListenAddr, err)
+	}
+	a.grpcSrv = grpcSrv
+	a.grpcLn = ln
+	slog.Info("grpc listening", "addr", ln.Addr().String(), "mtls", tlsEnabled(a.cfg))
+	a.doneW.Add(1)
+	go func() {
+		defer a.doneW.Done()
+		_ = grpcSrv.Serve(ln)
+	}()
+	a.addStop(func() { grpcSrv.GracefulStop() })
+	return nil
+}
+
+// startDiscovery регистрирует ноду в mDNS и ищет пиров; найденные адреса
+// идут в реестр кандидатов движка (доверие — только mTLS, не discovery).
+func (a *App) startDiscovery() error {
+	_, port, err := net.SplitHostPort(a.cfg.Network.GRPCListenAddr)
+	if err != nil {
+		return err
+	}
+	var grpcPort int
+	if _, err := fmt.Sscanf(port, "%d", &grpcPort); err != nil {
+		return fmt.Errorf("app: mdns grpc port: %w", err)
+	}
+	announcer, err := discovery.Announce(a.nodeID, grpcPort)
+	if err != nil {
+		return err
+	}
+	a.announcer = announcer
+	a.addStop(func() { announcer.Shutdown() })
+
+	browser := discovery.NewBrowser(a.cfg.Network.ServiceName)
+	discCtx, cancel := context.WithCancel(context.Background())
+	a.addStop(cancel)
+	a.doneW.Add(1)
+	go func() {
+		defer a.doneW.Done()
+		browser.Run(discCtx, a.cfg.Sync.Interval, func(peer discovery.PeerFound) {
+			if peer.NodeID == a.nodeID {
+				return
+			}
+			a.sync.addDiscoveredPeer(peer.NodeID, peer.Addr)
+			slog.Debug("discovery: peer candidate", "node_id", peer.NodeID, "addr", peer.Addr)
+		})
+	}()
+	return nil
+}
+
+// syncStatsSnapshot — значение для /api/v1/node (nil-безопасно).
+func (a *App) syncStatsSnapshot() any { return a.sync.StatsSnapshot() }
+
+// publishSyncStats отправляет кадр счётчиков sync в WS.
+func (a *App) publishSyncStats(stats []PeerStats) {
+	frame, err := json.Marshal(map[string]any{"type": "sync_stats", "peers": stats})
+	if err != nil {
+		slog.Error("marshal sync stats frame", "err", err)
+		return
+	}
+	a.hub.Publish(frame)
+}
+
+// SyncNow выполняет один проход цикла sync по всем пирам и возвращает
+// суммарные отправленные/принятые события. Используется тестами e2e и
+// ручными триггерами; обычный ритм задаёт runLoop.
+func (a *App) SyncNow(ctx context.Context) (sent int, received int, err error) {
+	before := a.sync.StatsSnapshot()
+	a.sync.runCycle(ctx)
+	after := a.sync.StatsSnapshot()
+	sum := func(ss []PeerStats) (int, int) {
+		var s, r int
+		for _, st := range ss {
+			s += st.EventsSent
+			r += st.EventsReceived
+		}
+		return s, r
+	}
+	sentBefore, recvBefore := sum(before)
+	sent, received = sum(after)
+	return sent - sentBefore, received - recvBefore, nil
 }
 
 // Migrate применяет миграции и закрывает хранилище (команда migrate).
