@@ -13,15 +13,15 @@ import (
 
 // Event — неизменяемый конверт события. Append-only: после записи не модифицируется.
 type Event struct {
-	EventID      string          `json:"event_id"        db:"event_id"`      // UUIDv7
-	NodeID       string          `json:"node_id"         db:"node_id"`
-	Sequence     uint64          `json:"sequence"        db:"sequence"`      // монотонный в пределах node_id
-	EventType    string          `json:"event_type"      db:"event_type"`    // см. ниже
-	SchemaVersion int            `json:"schema_version"  db:"schema_version"`
-	AggregateID  string          `json:"aggregate_id"    db:"aggregate_id"`
-	OccurredAt   time.Time       `json:"occurred_at"     db:"occurred_at"`
-	Payload      json.RawMessage `json:"payload"         db:"payload"` // только доменные данные, без конфига
-	ModelVersion string          `json:"model_version,omitempty" db:"model_version"`
+	EventID       string          `json:"event_id"        db:"event_id"` // UUIDv7
+	NodeID        string          `json:"node_id"         db:"node_id"`
+	Sequence      uint64          `json:"sequence"        db:"sequence"`   // монотонный в пределах node_id
+	EventType     string          `json:"event_type"      db:"event_type"` // см. ниже
+	SchemaVersion int             `json:"schema_version"  db:"schema_version"`
+	AggregateID   string          `json:"aggregate_id"    db:"aggregate_id"`
+	OccurredAt    time.Time       `json:"occurred_at"     db:"occurred_at"`
+	Payload       json.RawMessage `json:"payload"         db:"payload"` // только доменные данные, без конфига
+	ModelVersion  string          `json:"model_version,omitempty" db:"model_version"`
 }
 
 // PayloadHash — sha256 от канонического JSON payload.
@@ -77,14 +77,14 @@ type Observation struct {
 
 // TraitSnapshot — признаки из одного фото. Fingerprint — для поиска похожих, НЕ биологическое ID.
 type TraitSnapshot struct {
-	ID           string          `json:"id"`
-	ObservationID string         `json:"observation_id"`
-	ModelVersion string          `json:"model_version"`
-	Traits       json.RawMessage `json:"traits"`
-	Confidence   float64         `json:"confidence"`
-	Fingerprint  string          `json:"fingerprint"` // sha256 канонизированных признаков
-	Confirmed    bool            `json:"confirmed"`   // human-in-the-loop: человек подтвердил
-	Edited        bool           `json:"edited"`      // человек редактировал исходное предсказание
+	ID            string          `json:"id"`
+	ObservationID string          `json:"observation_id"`
+	ModelVersion  string          `json:"model_version"`
+	Traits        json.RawMessage `json:"traits"`
+	Confidence    float64         `json:"confidence"`
+	Fingerprint   string          `json:"fingerprint"` // sha256 канонизированных признаков
+	Confirmed     bool            `json:"confirmed"`   // human-in-the-loop: человек подтвердил
+	Edited        bool            `json:"edited"`      // человек редактировал исходное предсказание
 }
 
 // Blob — ссылка на файл. Фотографии не едут в payload событий.
