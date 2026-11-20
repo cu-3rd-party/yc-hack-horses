@@ -114,7 +114,7 @@ func RunEventStoreSuite(t *testing.T, newStore EventStoreFactory) {
 		require.NoError(t, err)
 		require.Len(t, missing, 2)
 		require.Equal(t, uint64(3), missing[0].Sequence) // node-a#3
-		require.Equal(t, "node-c", missing[1].NodeID)   // ноды нет в remote clock — всё отдаём
+		require.Equal(t, "node-c", missing[1].NodeID)    // ноды нет в remote clock — всё отдаём
 
 		empty, err := s.GetMissingEvents(ctx, storage.VectorClock{"node-a": 3, "node-c": 1})
 		require.NoError(t, err)

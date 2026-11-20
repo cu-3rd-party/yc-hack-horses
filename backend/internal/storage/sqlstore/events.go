@@ -160,8 +160,6 @@ func scanEvents(rows *sql.Rows) ([]domain.Event, error) {
 	return out, nil
 }
 
-
-
 // notFound переводит sql.ErrNoRows в storage.ErrNotFound с сохранением контекста.
 func notFound(what string, err error) error {
 	if errors.Is(err, sql.ErrNoRows) {

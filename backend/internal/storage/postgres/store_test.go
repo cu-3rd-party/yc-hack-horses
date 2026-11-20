@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
@@ -26,7 +25,9 @@ func testDSN(t *testing.T) string {
 	return dsn
 }
 
-func openStore(t *testing.T, dsn string) *sqlstore.Store {
+// openFresh открывает postgres, применяет миграции и очищает таблицы.
+// Субтесты изолируются очисткой (одна БД, zero-downtime схема идентична sqlite).
+func openFresh(t *testing.T, dsn string, truncate bool) *sqlstore.Store {
 	t.Helper()
 	s, err := postgres.New(dsn)
 	if err != nil {
@@ -35,15 +36,23 @@ func openStore(t *testing.T, dsn string) *sqlstore.Store {
 	if err := migrate.Apply(context.Background(), s.DB(), migrationsDir, "postgres"); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	if truncate {
+		if _, err := s.DB().ExecContext(context.Background(),
+			`TRUNCATE events, horses, observations, trait_snapshots, blobs`); err != nil {
+			t.Fatalf("truncate: %v", err)
+		}
+	}
 	return s
 }
 
 func TestEventStoreContract(t *testing.T) {
 	dsn := testDSN(t)
 	contract.RunEventStoreSuite(t, func(t *testing.T) (storage.EventStore, func() storage.EventStore) {
-		// изолированная схема на каждый субтест; reopen — та же база
-		dsn := dsn + "?options=-csearch_path%3Dcontract_" + strings.ReplaceAll(t.Name(), "/", "_")
-		return openStore(t, dsn), func() storage.EventStore { return openStore(t, dsn) }
+		// первый open субтеста очищает таблицы; reopen — та же база без очистки
+		first := true
+		s := openFresh(t, dsn, first)
+		first = false
+		return s, func() storage.EventStore { return openFresh(t, dsn, false) }
 	})
 }
 
