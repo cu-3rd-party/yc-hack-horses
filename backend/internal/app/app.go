@@ -25,6 +25,7 @@ import (
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -108,10 +109,19 @@ func New(cfg *config.Config) (*App, error) {
 	a.sync.setStatsPublisher(func(stats []PeerStats) { a.publishSyncStats(stats) })
 
 	// CV-движок (ADR-0012): по умолчанию UnavailableEngine — приложение не
-	// блокируется без модели; reference — baseline-эвристика на blobs.
+	// блокируется без модели; reference — baseline-эвристика на blobs;
+	// yolo — детекция YOLO ONNX + кропы (ADR-0012, V1). Движок yolo лениво
+	// грузит модель: без весов/библиотеки деградирует в ErrModelUnavailable.
 	var cvEngine inference.InferenceEngine = inference.NewUnavailable()
-	if cfg.Inference.Engine == "reference" {
+	switch cfg.Inference.Engine {
+	case "reference":
 		cvEngine = inference.NewReference(blobs)
+	case "yolo":
+		cvEngine = yolo.New(yolo.Config{
+			ModelPath:      cfg.Inference.ModelPath,
+			RuntimeLibPath: cfg.Inference.RuntimeLib,
+			Blobs:          blobs,
+		})
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:      store,
