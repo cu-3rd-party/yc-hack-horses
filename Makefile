@@ -1,3 +1,10 @@
+# Лимиты сборок: не больше 4 ядер (иначе убивает машины других агентов)
+TASKSET ?= taskset -c 0-3
+GOMAXPROCS := 4
+GOFLAGS += -p=4
+export GOMAXPROCS GOFLAGS
+GO_BUILD := $(TASKSET) $(GO) build
+
 # Управление
 GO ?= go
 BACKEND_DIR := backend
@@ -6,10 +13,10 @@ APP_DIR := app
 .PHONY: build backend test test-backend lint backend-fmt
 
 backend: ## сборка ноды
-	cd $(BACKEND_DIR) && $(GO) build -o ../bin/node ./cmd/node
+	cd $(BACKEND_DIR) && $(GO_BUILD) -o ../bin/node ./cmd/node
 
 backend-test: ## все тесты backend
-	cd $(BACKEND_DIR) && $(GO) test ./...
+	cd $(BACKEND_DIR) && $(TASKSET) $(GO) test ./...
 
 backend-fmt: ## gofumpt
 	cd $(BACKEND_DIR) && $(GO) run mvdan.cc/gofumpt@latest -w .
