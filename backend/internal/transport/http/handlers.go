@@ -354,7 +354,7 @@ func nodeInfo(d Deps) http.HandlerFunc {
 			serverError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{
+		out := map[string]any{
 			"node_id":      d.NodeID,
 			"app_version":  d.AppVersion,
 			"role_hint":    d.RoleHint,
@@ -362,7 +362,11 @@ func nodeInfo(d Deps) http.HandlerFunc {
 			"last_seq":     info.LastSeq,
 			"vector_clock": info.VectorClock,
 			"driver":       d.Store.Driver(),
-		})
+		}
+		if d.SyncStats != nil {
+			out["sync"] = d.SyncStats()
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

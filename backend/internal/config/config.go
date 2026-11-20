@@ -12,6 +12,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// PeerConfig — статический пир ноды.
+type PeerConfig struct {
+	// Addr — адрес gRPC-сервера пира (host:port).
+	Addr string `yaml:"addr"`
+	// NodeID — ожидаемый node_id пира (проверяется по URI SAN серта).
+	// Пусто — проверяется только валидность серта и наличие przewalski://node/.
+	NodeID string `yaml:"node_id"`
+	// Host — TLS ServerName для проверки серверного серта пира (DNS SAN).
+	// Пусто — берётся host из Addr.
+	Host string `yaml:"host"`
+}
+
 // Config — полная конфигурация ноды. Поля зеркалят config.example.yaml.
 type Config struct {
 	Node struct {
@@ -40,7 +52,15 @@ type Config struct {
 		CentralURL string        `yaml:"central_url"`
 		BatchSize  int           `yaml:"batch_size"`
 		Interval   time.Duration `yaml:"interval"`
+		// Peers — статически заданные пиры (адреса gRPC-серверов). Discovery
+		// добавляет кандидатов динамически; доверие в обоих случаях только mTLS.
+		Peers []PeerConfig `yaml:"peers"`
 	} `yaml:"sync"`
+	// Inference — локальный CV-движок (ADR-0012).
+	Inference struct {
+		// Engine — unavailable | reference (default: unavailable).
+		Engine string `yaml:"engine"`
+	} `yaml:"inference"`
 	LogLevel   string `yaml:"log_level"`
 	AppVersion string `yaml:"app_version"`
 }
@@ -62,6 +82,7 @@ func Default() *Config {
 	c.Sync.BatchSize = 256
 	c.Sync.Interval = 30 * time.Second
 	c.LogLevel = "info"
+	c.Inference.Engine = "unavailable"
 	c.AppVersion = "0.0.1-dev"
 	return c
 }
@@ -106,6 +127,7 @@ func (c *Config) applyEnv() {
 	envString("SYNC_CENTRAL_URL", &c.Sync.CentralURL)
 	envInt("SYNC_BATCH_SIZE", &c.Sync.BatchSize)
 	envDuration("SYNC_INTERVAL", &c.Sync.Interval)
+	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)
 }
@@ -156,11 +178,21 @@ func (c *Config) Validate() error {
 	if _, _, err := net.SplitHostPort(c.Network.GRPCListenAddr); err != nil {
 		return fmt.Errorf("config: network.grpc_listen_addr %q: %w", c.Network.GRPCListenAddr, err)
 	}
+	for _, p := range c.Sync.Peers {
+		if _, _, err := net.SplitHostPort(p.Addr); err != nil {
+			return fmt.Errorf("config: sync.peers addr %q: %w", p.Addr, err)
+		}
+	}
 	if c.Sync.Interval <= 0 {
 		return fmt.Errorf("config: sync.interval должен быть > 0")
 	}
 	if c.Sync.BatchSize <= 0 {
 		return fmt.Errorf("config: sync.batch_size должен быть > 0")
+	}
+	switch c.Inference.Engine {
+	case "unavailable", "reference":
+	default:
+		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference", c.Inference.Engine)
 	}
 	return nil
 }
