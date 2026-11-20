@@ -22,6 +22,12 @@ func Apply(ctx context.Context, db *sql.DB, dir, driver string) error {
 	if err != nil {
 		return err
 	}
+	return applyAll(ctx, db, files, driver)
+}
+
+// applyAll создаёт schema_migrations, читает применённые версии и накатывает файлы.
+// Общий путь для Apply и ApplyFS.
+func applyAll(ctx context.Context, db *sql.DB, files []migFile, driver string) error {
 	if _, err := db.ExecContext(ctx, createTableSQL(driver)); err != nil {
 		return fmt.Errorf("migrate: create schema_migrations: %w", err)
 	}
