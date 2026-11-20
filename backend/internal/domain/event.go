@@ -77,14 +77,15 @@ type Observation struct {
 
 // TraitSnapshot — признаки из одного фото. Fingerprint — для поиска похожих, НЕ биологическое ID.
 type TraitSnapshot struct {
-	ID            string          `json:"id"`
-	ObservationID string          `json:"observation_id"`
-	ModelVersion  string          `json:"model_version"`
-	Traits        json.RawMessage `json:"traits"`
-	Confidence    float64         `json:"confidence"`
-	Fingerprint   string          `json:"fingerprint"` // sha256 канонизированных признаков
-	Confirmed     bool            `json:"confirmed"`   // human-in-the-loop: человек подтвердил
-	Edited        bool            `json:"edited"`      // человек редактировал исходное предсказание
+	ID                 string          `json:"id"`
+	ObservationID      string          `json:"observation_id"`
+	ModelVersion       string          `json:"model_version"`
+	Traits             json.RawMessage `json:"traits"`
+	RawPredictedTraits json.RawMessage `json:"raw_predicted_traits,omitempty"` // исходное предсказание движка (ADR-0012)
+	Confidence         float64         `json:"confidence"`
+	Fingerprint        string          `json:"fingerprint"` // sha256 канонизированных признаков
+	Confirmed          bool            `json:"confirmed"`   // human-in-the-loop: человек подтвердил
+	Edited             bool            `json:"edited"`      // человек редактировал исходное предсказание
 }
 
 // Blob — ссылка на файл. Фотографии не едут в payload событий.
