@@ -143,7 +143,8 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          image="git.cu3rd.ru/cu3rd-private/yc-hack-horses"
+          # Публичный пакет (visibility public): раннер и чарт тянут без pull-секрета.
+          image="git.cu3rd.ru/cu3rd/yc-hack-horses"
           export DOCKER_CONFIG
           DOCKER_CONFIG=$(mktemp -d)
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
