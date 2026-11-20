@@ -56,6 +56,11 @@ type Config struct {
 		// добавляет кандидатов динамически; доверие в обоих случаях только mTLS.
 		Peers []PeerConfig `yaml:"peers"`
 	} `yaml:"sync"`
+	// Inference — локальный CV-движок (ADR-0012).
+	Inference struct {
+		// Engine — unavailable | reference (default: unavailable).
+		Engine string `yaml:"engine"`
+	} `yaml:"inference"`
 	LogLevel   string `yaml:"log_level"`
 	AppVersion string `yaml:"app_version"`
 }
@@ -77,6 +82,7 @@ func Default() *Config {
 	c.Sync.BatchSize = 256
 	c.Sync.Interval = 30 * time.Second
 	c.LogLevel = "info"
+	c.Inference.Engine = "unavailable"
 	c.AppVersion = "0.0.1-dev"
 	return c
 }
@@ -121,6 +127,7 @@ func (c *Config) applyEnv() {
 	envString("SYNC_CENTRAL_URL", &c.Sync.CentralURL)
 	envInt("SYNC_BATCH_SIZE", &c.Sync.BatchSize)
 	envDuration("SYNC_INTERVAL", &c.Sync.Interval)
+	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)
 }
@@ -181,6 +188,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Sync.BatchSize <= 0 {
 		return fmt.Errorf("config: sync.batch_size должен быть > 0")
+	}
+	switch c.Inference.Engine {
+	case "unavailable", "reference":
+	default:
+		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference", c.Inference.Engine)
 	}
 	return nil
 }

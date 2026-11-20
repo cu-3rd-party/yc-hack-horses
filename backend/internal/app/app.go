@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -106,6 +107,12 @@ func New(cfg *config.Config) (*App, error) {
 	a.hub = httpapi.NewHub()
 	a.sync.setStatsPublisher(func(stats []PeerStats) { a.publishSyncStats(stats) })
 
+	// CV-движок (ADR-0012): по умолчанию UnavailableEngine — приложение не
+	// блокируется без модели; reference — baseline-эвристика на blobs.
+	var cvEngine inference.InferenceEngine = inference.NewUnavailable()
+	if cfg.Inference.Engine == "reference" {
+		cvEngine = inference.NewReference(blobs)
+	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:      store,
 		Blobs:      blobs,
@@ -114,6 +121,7 @@ func New(cfg *config.Config) (*App, error) {
 		RoleHint:   cfg.Node.RoleHint,
 		AppVersion: cfg.AppVersion,
 		SyncStats:  a.syncStatsSnapshot,
+		Engine:     cvEngine,
 	})
 	a.srv = &http.Server{
 		Addr:              cfg.Network.ListenAddr,
