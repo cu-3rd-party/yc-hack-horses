@@ -9,8 +9,8 @@ import (
 
 	syncv1 "github.com/cu3rd/yc-hack-horses/backend/api/gen/sync/v1"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
-	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
+	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
 )
 
 // Client — адаптер syncengine.Peer поверх сгенерированного gRPC-клиента.
@@ -52,9 +52,9 @@ func (cl *Client) Handshake(ctx context.Context, req syncengine.HandshakeRequest
 	ctx, cancel := context.WithTimeout(ctx, cl.timeout())
 	defer cancel()
 	resp, err := cl.c.Handshake(ctx, &syncv1.HandshakeRequest{
-		NodeId:     req.NodeID,
+		NodeId:          req.NodeID,
 		ProtocolVersion: syncengine.ProtocolVersion,
-		AppVersion: req.AppVersion,
+		AppVersion:      req.AppVersion,
 	})
 	if err != nil {
 		return syncengine.HandshakeInfo{}, fmt.Errorf("grpc handshake: %w", err)
@@ -110,19 +110,21 @@ func (cl *Client) PullEvents(ctx context.Context, have storage.VectorClock, limi
 	}
 }
 
-// PushEvents — клиентский стрим батчей с AckBatch в конце.
+// PushEvents — клиентский стрим батчей с AckBatch в конце. Контекст живёт
+// до Close() синка — стрим используется после возврата из PushEvents.
 func (cl *Client) PushEvents(ctx context.Context) (syncengine.PeerEventSink, error) {
-	ctx, cancel := context.WithTimeout(ctx, 4*cl.timeout())
-	defer cancel()
-	stream, err := cl.c.PushEvents(ctx)
+	streamCtx, cancel := context.WithTimeout(ctx, 4*cl.timeout())
+	stream, err := cl.c.PushEvents(streamCtx)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("grpc push events: open: %w", err)
 	}
-	return &pushSink{stream: stream}, nil
+	return &pushSink{stream: stream, cancel: cancel}, nil
 }
 
 type pushSink struct {
 	stream syncv1.SyncService_PushEventsClient
+	cancel context.CancelFunc
 }
 
 func (p *pushSink) Send(events []domain.Event) error {
@@ -137,6 +139,7 @@ func (p *pushSink) Send(events []domain.Event) error {
 }
 
 func (p *pushSink) Close() (syncengine.Ack, error) {
+	defer p.cancel()
 	resp, err := p.stream.CloseAndRecv()
 	if err != nil {
 		return syncengine.Ack{}, fmt.Errorf("grpc push events: ack: %w", err)

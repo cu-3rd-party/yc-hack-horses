@@ -4,6 +4,8 @@ package grpc
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +15,10 @@ import (
 
 	syncv1 "github.com/cu3rd/yc-hack-horses/backend/api/gen/sync/v1"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
-	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
+	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
+
+	"google.golang.org/grpc"
 )
 
 // ServerDeps — зависимости сервера SyncService.
@@ -197,6 +201,11 @@ func (s *Server) UploadBlob(stream syncv1.SyncService_UploadBlobServer) error {
 }
 
 func (s *Server) storeBlob(ctx context.Context, sha256hex string, data []byte) error {
+	// Проверка целостности после приёма: несоответствие — отказ без записи.
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); got != sha256hex {
+		return fmt.Errorf("%w: want %s got %s", syncengine.ErrBlobHash, sha256hex, got)
+	}
 	has, err := s.deps.Blobs.Has(ctx, sha256hex)
 	if err != nil {
 		return fmt.Errorf("upload blob: check %s: %w", sha256hex, err)
@@ -234,6 +243,11 @@ func (s *Server) DownloadBlob(req *syncv1.BlobHash, stream syncv1.SyncService_Do
 	return nil
 }
 
+// Register регистрирует SyncService на gRPC-сервере.
+func Register(s *grpc.Server, srv *Server) {
+	syncv1.RegisterSyncServiceServer(s, srv)
+}
+
 // --- маппинг proto <-> domain ---
 
 func clockFromProto(c *syncv1.VectorClock) storage.VectorClock {
@@ -254,30 +268,30 @@ func clockToProto(c storage.VectorClock) *syncv1.VectorClock {
 
 func eventToProto(e domain.Event) *syncv1.Event {
 	return &syncv1.Event{
-		EventId:         e.EventID,
-		NodeId:          e.NodeID,
-		Sequence:        e.Sequence,
-		EventType:       e.EventType,
-		SchemaVersion:   int32(e.SchemaVersion),
-		AggregateId:     e.AggregateID,
+		EventId:          e.EventID,
+		NodeId:           e.NodeID,
+		Sequence:         e.Sequence,
+		EventType:        e.EventType,
+		SchemaVersion:    int32(e.SchemaVersion),
+		AggregateId:      e.AggregateID,
 		OccurredAtUnixMs: e.OccurredAt.UnixMilli(),
-		Payload:         []byte(e.Payload),
-		PayloadHash:     e.PayloadHash(),
-		ModelVersion:    e.ModelVersion,
+		Payload:          []byte(e.Payload),
+		PayloadHash:      e.PayloadHash(),
+		ModelVersion:     e.ModelVersion,
 	}
 }
 
 func eventFromProto(e *syncv1.Event) (domain.Event, error) {
 	ev := domain.Event{
-		EventID:      e.GetEventId(),
-		NodeID:       e.GetNodeId(),
-		Sequence:     e.GetSequence(),
-		EventType:    e.GetEventType(),
+		EventID:       e.GetEventId(),
+		NodeID:        e.GetNodeId(),
+		Sequence:      e.GetSequence(),
+		EventType:     e.GetEventType(),
 		SchemaVersion: int(e.GetSchemaVersion()),
-		AggregateID:  e.GetAggregateId(),
-		OccurredAt:   time.UnixMilli(e.GetOccurredAtUnixMs()).UTC(),
-		Payload:      json.RawMessage(e.GetPayload()),
-		ModelVersion: e.GetModelVersion(),
+		AggregateID:   e.GetAggregateId(),
+		OccurredAt:    time.UnixMilli(e.GetOccurredAtUnixMs()).UTC(),
+		Payload:       json.RawMessage(e.GetPayload()),
+		ModelVersion:  e.GetModelVersion(),
 	}
 	if e.GetPayloadHash() != "" && e.GetPayloadHash() != ev.PayloadHash() {
 		return domain.Event{}, fmt.Errorf("event %s: payload hash mismatch", ev.EventID)
