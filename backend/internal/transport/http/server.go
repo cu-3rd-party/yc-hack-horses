@@ -1,0 +1,127 @@
+// Package http: REST/WS транспорт ноды (chi). Роутер собирается из Deps,
+// поэтому тесты поднимают его в процессе без сокета.
+package http
+
+import (
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+// Deps — зависимости транспортного слоя.
+type Deps struct {
+	Store      *sqlstore.Store
+	Blobs      storage.BlobStore
+	Hub        *Hub
+	NodeID     string
+	RoleHint   string
+	AppVersion string
+	// Clock подменяется в тестах; nil = time.Now.
+	Clock func() time.Time
+}
+
+// NewRouter собирает chi-роутер со всеми маршрутами v1.
+func NewRouter(d Deps) http.Handler {
+	if d.Clock == nil {
+		d.Clock = time.Now
+	}
+	if d.Hub == nil {
+		d.Hub = NewHub()
+	}
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(requestLogger)
+	r.Use(middleware.Recoverer)
+
+	r.Get("/health", handleHealth)
+	r.Get("/readyz", handleReady(d))
+
+	r.Route("/api/v1", func(v1 chi.Router) {
+		v1.Get("/horses", listHorses(d))
+		v1.Post("/horses", createHorse(d))
+		v1.Patch("/horses/{id}", patchHorse(d))
+		v1.Get("/horses/{id}", getHorse(d))
+
+		v1.Get("/observations", listObservations(d))
+		v1.Post("/observations", createObservation(d))
+
+		v1.Post("/blobs", uploadBlob(d))
+		v1.Get("/blobs", listBlobs(d))
+		v1.Get("/blobs/{sha256}", getBlob(d))
+
+		v1.Get("/node", nodeInfo(d))
+		v1.Get("/events", streamEvents(d))
+	})
+
+	// JSON 404/405 вместо текстовых
+	r.NotFound(notFoundJSON)
+	r.MethodNotAllowed(methodNotAllowedJSON)
+	return r
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		start := time.Now()
+		next.ServeHTTP(ww, r)
+		slog.Debug("http request",
+			"method", r.Method, "path", r.URL.Path, "status", ww.Status(),
+			"bytes", ww.BytesWritten(), "duration", time.Since(start).String())
+	})
+}
+
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func handleReady(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := contextWithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := d.Store.Ping(ctx); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "db unavailable"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+	}
+}
+
+func notFoundJSON(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusNotFound, map[string]string{"message": "not found"})
+}
+
+func methodNotAllowedJSON(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"message": "method not allowed"})
+}
+
+// --- вспомогательные функции ответов/ошибок ---
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"message": msg})
+}
+
+// notFoundOrServerError повторяет соглашение шаблона: 404 для storage.ErrNotFound, иначе 500.
+func notFoundOrServerError(w http.ResponseWriter, err error, what string) {
+	if errors.Is(err, storage.ErrNotFound) {
+		writeError(w, http.StatusNotFound, what+" not found")
+		return
+	}
+	slog.Error("internal error", "what", what, "err", err)
+	writeError(w, http.StatusInternalServerError, "internal error")
+}
