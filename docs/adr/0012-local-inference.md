@@ -42,6 +42,7 @@ Inference — локально на устройстве через интерф
 - **Embed:** детерминированный вектор из пуллинга пикселей кропа (сетка 4x4 средних RGB + глобальные средние, 64 значения) — НЕ вектор нейросети: детектор не даёт эмбеддингов.
 - **Ответ строго содержит:** `model_version` (`yolov8n-coco-v1`), `confidence` = уверенность детекции, и дисклеймер REST-ответа: «предзаполнение — НЕ идентификация; требует подтверждения человеком».
 - **Конфиг:** `inference.engine: yolo | reference | unavailable`, `inference.model_path`, `inference.runtime_lib`. Если веса или onnxruntime-библиотека недоступны — `ErrModelUnavailable`, приложение продолжает работать (человек вводит признаки сам).
+- **CGO-сборка с YOLO** — desktop/mobile бинарь (`//go:build cgo`, yolo_onnx_cgo.go); контейнер центральной ноды собирается CGO-free (`//go:build !cgo`, yolo_nocgo.go) — без onnxruntime движок деградирует в `ErrModelUnavailable` (REST 503), публичный API движка одинаков в обоих вариантах.
 - **Нет лошади на фото** — `inference.ErrNoAnimalDetected` → REST 400 «введите признаки вручную».
 
 ### Веса и лицензия

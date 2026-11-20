@@ -51,6 +51,9 @@ make compose-down             # остановить
 накатывает миграции на postgres (DATABASE_URL из `.env`); при обновлении образа
 миграции применяются на старте автоматически.
 
+YOLO-инференс требует CGO-сборку (desktop/mobile бинарь); контейнер центральной
+ноды собирается CGO-free — инференс деградирует в `ErrModelUnavailable` (ADR-0012).
+
 ## Деплой в self-service
 
 Central нода живёт в self-service как проект `yc-hack-horses` (env `prod`, зона `grm`,
@@ -59,6 +62,18 @@ Central нода живёт в self-service как проект `yc-hack-horses`
 сборка+тест backend, сборка клиентского фронтенда (`app/`), проверка desktop-клиента,
 затем джоба `deploy` публикует образ `git.cu3rd.ru/cu3rd-private/yc-hack-horses:<sha>` и
 вызывает деплой self-service (project/environment/app). Статус: `ss status yc-hack-horses prod`.
+
+## Релизы (тег v*)
+
+Push тега `v*` запускает `.forgejo/workflows/release.yml`: собираются
+`backend-linux-amd64.tar.gz` (бинарь ноды + config.example.yaml + README), десктоп-клиент
+(.deb и .AppImage через tauri build; сборщик — публичный CI-образ
+`git.cu3rd.ru/cu3rd/yc-hack-horses-ci/tauri-base:latest`, исходник
+`infra/docker/tauri-base.Dockerfile`) и android APK (expo prebuild + gradle,
+release-APK подписан debug-ключом — Play-ready подписи нет). Джоба
+`release-publish` создаёт **draft-релиз** через Forgejo API (секрет `RELEASE_TOKEN`
+в Actions репо) и прикладывает артефакты. Релиз остаётся черновиком — публикуй
+после проверки вручную; автоматическая публикация — поставь `"draft":false`.
 
 ## Генерация dev CA
 

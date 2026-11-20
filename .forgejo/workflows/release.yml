@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Драфт-релиз по тегу v*: backend (linux-amd64), desktop (.deb/.AppImage),
+# mobile (APK). Публикация релиза — вручную (draft остаётся до проверки).
+jobs:
+  release-backend:
+    name: backend-linux-amd64
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    env:
+      GOMAXPROCS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Build node (linux-amd64)
+        working-directory: backend
+        # CGO включён: YOLO-инференс тянет onnxruntime (cgo), бинарник динамический
+        run: CGO_ENABLED=1 GOFLAGS="-p=4" go build -o ../bin/node ./cmd/node
+      - name: Pack backend bundle
+        run: |
+          tar czf backend-linux-amd64.tar.gz \
+            -C bin node \
+            -C .. backend/config.example.yaml README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-linux-amd64
+          path: backend-linux-amd64.tar.gz
+
+  release-frontend-dist:
+    name: frontend dist (для tauri)
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build client bundle
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: |
+          cd app
+          npm ci --maxsockets=4 --cache ~/.npm
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-dist
+          path: app/dist
+
+  release-desktop:
+    name: desktop (.deb / .AppImage)
+    runs-on: homelab-docker
+    container: git.cu3rd.ru/cu3rd/yc-hack-horses-ci/tauri-base:latest
+    options: --cpus 2 --memory 4g
+    env:
+      CARGO_BUILD_JOBS: '4'
+      NODE_OPTIONS: --max-old-space-size=2048
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build frontend dist
+        run: |
+          cd app
+          npm ci --maxsockets=4 --cache ~/.npm
+          npm run build
+      - name: Tauri build (deb, AppImage)
+        run: |
+          cd desktop/src-tauri
+          npx tauri build --ci
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-bundles
+          path: |
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+
+  release-mobile:
+    name: mobile (android APK)
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build APK (expo prebuild + gradle)
+        # Java 17 + Android SDK ставится sdkmanager'ом в-job; при отсутствии
+        # релизного ключа подписываем debug-ключом (тестовый APK, не Play-ready).
+        run: |
+          if [ ! -f mobile/package.json ]; then echo 'mobile/ отсутствует — skip'; exit 0; fi
+          apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless unzip wget
+          sdk=/opt/android-sdk; mkdir -p "$sdk"
+          export ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/tools.zip
+          unzip -q /tmp/tools.zip -d "$sdk/cmdline-tools"
+          mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+          yes | sdkmanager --sdk_root="$sdk" --licenses >/dev/null || true
+          sdkmanager --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
+          cd mobile
+          npm ci --maxsockets=4 --cache ~/.npm
+          npx expo prebuild -p android --no-install
+          cd android && ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+
+  release-publish:
+    name: Create draft release
+    needs: [release-backend, release-desktop, release-mobile]
+    if: always() && !cancelled() && needs.release-backend.result == 'success' && needs.release-desktop.result == 'success'
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create draft release and upload assets
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          # Драфт-релиз по тегу (тег уже запушен); артефакты прикладываются multipart-ом.
+          rid=$(curl -sS -H "Authorization: token $RELEASE_TOKEN" -X POST \
+            "https://git.cu3rd.ru/api/v1/repos/$REPO/releases" \
+            -H 'Content-Type: application/json' \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":true}" \
+            | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("id",""))')
+          if [ -z "$rid" ]; then echo 'не удалось создать релиз' >&2; exit 1; fi
+          find artifacts -type f | while read -r f; do
+            name=$(basename "$f")
+            curl -sS -H "Authorization: token $RELEASE_TOKEN" -X POST \
+              "https://git.cu3rd.ru/api/v1/repos/$REPO/releases/$rid/assets?name=$name" \
+              -F "attachment=@$f" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("name") or d)'
+          done
+          echo "release id: $rid (draft)"
