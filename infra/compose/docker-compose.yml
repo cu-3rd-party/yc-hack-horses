@@ -1,0 +1,50 @@
+# Центральная нода: postgres + central node (образ собирает CI или backend/Dockerfile локально).
+# Запуск: make compose-up (нужен .env — скопируй из .env.example и заполни).
+name: yc-hack-horses
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    # Лимиты, чтобы стек не съел машину разработчика целиком.
+    cpus: "2"
+    mem_limit: 2g
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # postgres 18+ хранит данные в /var/lib/postgresql/<major> — монтируем корень.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  node:
+    # Локально: docker build -f backend/Dockerfile -t git.cu3rd.ru/cu3rd/yc-hack-horses:local backend
+    # В CI образ публикуется джобой deploy с тегом sha.
+    image: ${NODE_IMAGE:-git.cu3rd.ru/cu3rd/yc-hack-horses:local}
+    restart: unless-stopped
+    cpus: "2"
+    mem_limit: 2g
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${NODE_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      LISTEN_ADDR: ${LISTEN_ADDR:-:8080}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_CERT_FILE: /run/secrets/node.crt
+      NODE_KEY_FILE: /run/secrets/node.key
+      CA_FILE: /run/secrets/ca.crt
+    volumes:
+      # mTLS-сертификаты генерирует infra/scripts/gen-dev-certs.sh (make dev-certs),
+      # монтируются read-only и не пекутся в образ; до запуска скрипта каталог пуст —
+      # нода поднимается и для отладки REST API без mTLS.
+      - ../certs:/run/secrets:ro
+
+volumes:
+  postgres-data:

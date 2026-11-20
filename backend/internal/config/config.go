@@ -58,8 +58,12 @@ type Config struct {
 	} `yaml:"sync"`
 	// Inference — локальный CV-движок (ADR-0012).
 	Inference struct {
-		// Engine — unavailable | reference (default: unavailable).
+		// Engine — unavailable | reference | yolo (default: unavailable).
 		Engine string `yaml:"engine"`
+		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
+		ModelPath string `yaml:"model_path"`
+		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
+		RuntimeLib string `yaml:"runtime_lib"`
 	} `yaml:"inference"`
 	LogLevel   string `yaml:"log_level"`
 	AppVersion string `yaml:"app_version"`
@@ -128,6 +132,8 @@ func (c *Config) applyEnv() {
 	envInt("SYNC_BATCH_SIZE", &c.Sync.BatchSize)
 	envDuration("SYNC_INTERVAL", &c.Sync.Interval)
 	envString("INFER_ENGINE", &c.Inference.Engine)
+	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
+	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)
 }
@@ -191,8 +197,15 @@ func (c *Config) Validate() error {
 	}
 	switch c.Inference.Engine {
 	case "unavailable", "reference":
+	case "yolo":
+		if c.Inference.ModelPath == "" {
+			return fmt.Errorf("config: inference.engine yolo: требуется inference.model_path")
+		}
+		if c.Inference.RuntimeLib == "" {
+			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
+		}
 	default:
-		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference", c.Inference.Engine)
+		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference | yolo", c.Inference.Engine)
 	}
 	return nil
 }

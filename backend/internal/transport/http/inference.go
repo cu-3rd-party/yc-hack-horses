@@ -20,6 +20,9 @@ import (
 // similarDisclaimer — явный дисклеймер ответа поиска похожих.
 const similarDisclaimer = "fingerprint — поиск похожих по набору признаков, НЕ биологическая идентичность"
 
+// predraftDisclaimer — дисклеймер предзаполнения трейтов (в т.ч. YOLO-детекцией).
+const predraftDisclaimer = "предзаполнение — НЕ идентификация; требует подтверждения человеком"
+
 // traitSnapshotResponse — TraitResult + snapshot metadata из БД.
 type traitSnapshotResponse struct {
 	domain.TraitSnapshot
@@ -72,7 +75,12 @@ func postInferenceTraits(d Deps) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Location", "/api/v1/trait_snapshots/"+ts.ID)
-		writeJSON(w, http.StatusCreated, ts)
+		// Дисклеймер обязателен: предзаполнение — НЕ идентификация, человек
+		// подтверждает признаки (ADR-0012, human-in-the-loop).
+		writeJSON(w, http.StatusCreated, traitSnapshotResponse{
+			TraitSnapshot: ts,
+			Disclaimer:    predraftDisclaimer,
+		})
 	}
 }
 
@@ -181,6 +189,8 @@ func handleInferenceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "model unavailable: введите признаки вручную (ADR-0012)")
 	case errors.Is(err, inference.ErrInvalidImage):
 		writeError(w, http.StatusBadRequest, "invalid image")
+	case errors.Is(err, inference.ErrNoAnimalDetected):
+		writeError(w, http.StatusBadRequest, "no animal detected: введите признаки вручную")
 	default:
 		slog.Error("inference failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

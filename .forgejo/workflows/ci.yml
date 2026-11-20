@@ -1,0 +1,174 @@
+name: Test, publish and deploy
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+# Раннер тянет только локально закэшированные act-образы — все джобы на act-24.04
+# с setup-* шагами (как в paste), готовых образов golang/node недоступны.
+jobs:
+  changes:
+    name: Detect changed containers
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compare build inputs
+        id: changes
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BEFORE_SHA: ${{ github.event.before }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 .ci/changes.py
+
+  build-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    env:
+      GOMAXPROCS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: gomod-${{ hashFiles('backend/go.sum') }}
+      - name: Test and build node (sqlite)
+        working-directory: backend
+        run: |
+          go vet ./...
+          go run mvdan.cc/gofumpt@v0.7.0 -l .
+          go build ./...
+          go test ./...
+
+  build-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('app/package-lock.json') }}
+      - name: Build client bundle
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+        # Пока app/ не завезли фронтенд-агентом, джоба считается пройденной.
+        # working-directory не используем: несуществующий каталог валит шаг до guard-а.
+        run: |
+          if [ ! -f app/package.json ]; then echo 'app/ отсутствует — skip'; exit 0; fi
+          cd app
+          npm ci --maxsockets=4 --cache ~/.npm && npm run build
+
+  build-desktop:
+    # Клиент не деплоится — проверяем, что десктоп собирается; тяжёлую tauri-сборку не гоняем.
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check desktop client
+        # Пока desktop/ не завезли, джоба считается пройденной; rust доставляет setup шаг.
+        run: |
+          if [ ! -f desktop/src-tauri/Cargo.toml ]; then echo 'desktop/ отсутствует — skip'; exit 0; fi
+          command -v cargo >/dev/null || (curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH")
+          cargo check
+
+  build-image:
+    needs: [changes, build-backend]
+    # docker CLI есть только в act-образе; сборка/пуш — отдельной джобой.
+    if: >-
+      always() && !cancelled() &&
+      needs.changes.outputs.backend == 'true' &&
+      needs.build-backend.result == 'success'
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish image
+        env:
+          REGISTRY_USER: ${{ vars.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          image="git.cu3rd.ru/cu3rd-private/yc-hack-horses"
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login git.cu3rd.ru --username "$REGISTRY_USER" --password-stdin
+          if [ -f backend/Dockerfile ]; then
+            docker build --cpuset-cpus 0-3 --memory 4g -f backend/Dockerfile -t "$image:$IMAGE_TAG" backend
+          else
+            echo '::warning::backend/Dockerfile ещё не готов — собираем черновой образ /health'
+            docker build --cpuset-cpus 0-3 --memory 4g -f infra/deploy/Dockerfile.draft -t "$image:$IMAGE_TAG" infra/deploy
+          fi
+          # Push только на master: из PR образы не публикуем.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then docker push "$image:$IMAGE_TAG"; fi
+
+  deploy:
+    needs: [changes, build-image]
+    # always() нужен, чтобы skipped у неизменившегося компонента не блокировал джобу.
+    if: >-
+      always() && !cancelled() &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/master' &&
+      needs.changes.result == 'success' &&
+      needs.build-image.result == 'success'
+    runs-on: homelab-docker
+    # Подтверждает происхождение доставки: PR с новым тегом сливает self-service-approver.
+    # Без этого каждая доставка ждала бы ревью SRE.
+    enable-openid-connect: true
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - name: Propose self-service deployment (backend)
+        uses: https://git.cu3rd.ru/cu3rd/self-service/actions/deploy@master
+        with:
+          project: yc-hack-horses
+          environment: prod
+          app: web
+          tag: ${{ github.sha }}
+          secrets-json: ${{ toJSON(secrets) }}
+          variables-json: ${{ toJSON(vars) }}
+          delivery-token: ${{ secrets.SELF_SERVICE_DELIVERY_TOKEN }}

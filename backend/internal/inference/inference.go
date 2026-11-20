@@ -21,6 +21,11 @@ var ErrModelUnavailable = errors.New("inference: model unavailable")
 // ErrInvalidImage — данные не декодируются как изображение или отсутствуют.
 var ErrInvalidImage = errors.New("inference: invalid image")
 
+// ErrNoAnimalDetected — детекция не нашла животное на изображении
+// (движок детекции YOLO). Приложение продолжает работать: признаки вводит
+// человек (ADR-0012).
+var ErrNoAnimalDetected = errors.New("inference: no animal detected")
+
 // InferenceEngine — контракт локального CV-движка. Все методы должны быть
 // безопасны для вызова без обученной модели: движок-заглушка возвращает
 // ErrModelUnavailable, а не панику или блокировку.

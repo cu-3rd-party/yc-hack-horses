@@ -10,7 +10,7 @@ GO ?= go
 BACKEND_DIR := backend
 APP_DIR := app
 
-.PHONY: build backend test test-backend lint backend-fmt
+.PHONY: build backend test test-backend lint backend-fmt compose-up compose-down compose-logs compose-status
 
 backend: ## сборка ноды
 	cd $(BACKEND_DIR) && $(GO_BUILD) -o ../bin/node ./cmd/node
@@ -34,10 +34,16 @@ app-build:
 	cd $(APP_DIR) && npm run build
 
 compose-up:
-	docker compose -f infra/compose/docker-compose.yml up -d
+	docker compose --env-file .env -f infra/compose/docker-compose.yml up -d
 
 compose-down:
-	docker compose -f infra/compose/docker-compose.yml down
+	docker compose --env-file .env -f infra/compose/docker-compose.yml down
+
+compose-logs: ## логи центральной ноды (docker compose)
+	docker compose --env-file .env -f infra/compose/docker-compose.yml logs -f node
+
+compose-status: ## статус стеков docker compose
+	docker compose --env-file .env -f infra/compose/docker-compose.yml ps
 
 dev-certs: ## dev CA и сертификаты (development-only)
 	bash infra/scripts/gen-dev-certs.sh

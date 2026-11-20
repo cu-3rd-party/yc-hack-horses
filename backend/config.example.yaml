@@ -25,3 +25,10 @@ sync:
   central_url: "https://yc-hack-horses.cu3rd.ru"   # central считается только при успешной TLS-проверке этого hostname
   batch_size: 256
   interval: "30s"
+
+inference:
+  engine: "unavailable"     # unavailable | reference | yolo (ADR-0012)
+  # engine: yolo — детекция лошади YOLO ONNX + кропы; веса НЕ в git:
+  # bash infra/scripts/download-yolo-model.sh
+  # model_path: "infra/models/yolov8n.onnx"
+  # runtime_lib: "infra/models/libonnxruntime.so.1.31.1"
