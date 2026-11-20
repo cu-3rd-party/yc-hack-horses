@@ -1,0 +1,20 @@
+version: "2"
+
+linters:
+  default: standard
+  disable:
+    - errcheck # ошибки IO-записи в http.ResponseWriter игнорируются сознательно
+  settings:
+    importas:
+      alias:
+        - pkg: github.com/cu3rd/yc-hack-horses/backend/internal/transport/http
+          alias: httpapi
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofumpt
