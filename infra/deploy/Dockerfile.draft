@@ -1,0 +1,5 @@
+# Черновой образ центральной ноды: используется CI до появления backend/Dockerfile,
+# отвечает 200 на /health, чтобы деплой в self-service поднимался и ingress был зелёным.
+FROM nginxinc/nginx-unprivileged:alpine
+COPY nginx-draft.conf /etc/nginx/conf.d/default.conf
+EXPOSE 8080
