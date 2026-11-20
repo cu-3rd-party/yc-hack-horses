@@ -29,4 +29,25 @@ Inference — локально на устройстве через интерф
 - `ReferenceEngine` — **baseline** на цветовых гистограммах по областям (stdlib image/*). Работает, но это **НЕ обученная модель** и **НЕ идентификация**; confidence жёстко 0.3, подтверждение человеком обязательно. Подробности — backend/internal/inference/README.md.
 
 ### Точка расширения ONNX (V1)
-Обученная модель подключается реализацией `InferenceEngine` на onnxruntime-go: предобработка по `PreprocessSpec`, вход по `ImageInput.SHA256` из BlobStore. Контракт движка и REST-эндпоинты не меняются.
+Обученная модель подключается реализацией `InferenceEngine` на onnxruntime-go: предобработка по `ModelMetadata.PreprocessSpec` (256x256, RGB, NHWC, 0..1), вход по `ImageInput.SHA256` из BlobStore, выход — признаки + embedding. Контракт движка и REST-эндпоинты при этом не меняются.
+
+## Расширение (V1, feat/yolo-cv): YOLO-детекция + кроп, НЕ трейты
+
+### Решение
+`backend/internal/inference/yolo.YoloEngine` — реализация `InferenceEngine` на предобученной **YOLOv8n** (ONNX, ultralytics release v8.4.0, COCO). Инференс — onnxruntime-go (`github.com/yalue/onnxruntime_go` v1.38.0, ORT API 31):
+
+- **Детекция, не трейты.** YOLO выдаёт прямоугольную область животного (COCO class `horse` = 17). Обученности на лошадях Пржевальского **нет и не заявляется**.
+- **Пайплайн:** letterbox 640x640 (серый 114) → NCHW 1x3x640x640, 0..1 → NMS-free head (1x84x8400) → фильтр класса 17 → NMS (IoU 0.45) → при мультивидных лошадях берётся самая уверенная детекция.
+- **Кропы:** весь корпус (bbox ±5%) и голова/морда (верхние 30% bbox, центральные 60% — эвристика стоящей лошади). Кропы передаются в делегирующую стратегию `TraitDelegate` (по умолчанию — гистограммная эвристика по областям, аналог ReferenceEngine, но по кропам). Результат — предзаполнение: снимок `trait_snapshots` с `confirmed=false`, человек подтверждает/правит (human-in-the-loop уже есть).
+- **Embed:** детерминированный вектор из пуллинга пикселей кропа (сетка 4x4 средних RGB + глобальные средние, 64 значения) — НЕ вектор нейросети: детектор не даёт эмбеддингов.
+- **Ответ строго содержит:** `model_version` (`yolov8n-coco-v1`), `confidence` = уверенность детекции, и дисклеймер REST-ответа: «предзаполнение — НЕ идентификация; требует подтверждения человеком».
+- **Конфиг:** `inference.engine: yolo | reference | unavailable`, `inference.model_path`, `inference.runtime_lib`. Если веса или onnxruntime-библиотека недоступны — `ErrModelUnavailable`, приложение продолжает работать (человек вводит признаки сам).
+- **Нет лошади на фото** — `inference.ErrNoAnimalDetected` → REST 400 «введите признаки вручную».
+
+### Веса и лицензия
+- yolov8n.onnx — release-asset [ultralytics/assets v8.4.0](https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx), sha256 `b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd`.
+- **Лицензия AGPL-3.0 (ultralytics):** применимость оценена как приемлемая для этой интеграции с оговоркой: веса не распространяются как часть репозитория (лежат в `infra/models/`, вне git, скачиваются `infra/scripts/download-yolo-model.sh`), проект — offline-first внутренний инструмент, YOLO-код (обучение/экспорт) не копируется в репозиторий — используется только бинарный ONNX-файл. Если AGPL-сканирование CI или распространение desktop-приложения станет проблемой — альтернатива: модели ONNX model zoo (MIT) или yolov9/yolo-world с Apache-2.0-выходами; замена — только веса и константы `yolo.ModelVersion`, контракт не меняется.
+- onnxruntime shared library — NuGet `Microsoft.ML.OnnxRuntime` 1.31.1 (GitHub-релизы microsoft/onnxruntime недоступны с 2026-11-17; NuGet-пакет остаётся источником).
+
+### Тесты
+Юнит: letterbox/NMS/декодер на матрицах; кропы; deterministic embedding. Пайплайн на реальной модели — прогон на фото лошади (результат зафиксирован в PR_DESCRIPTION-node-yolo.md), на синтетическом изображении — детекция отсутствия с корректной ошибкой. Интеграционные: эндпоинты с YoloEngine через httptest (503 без модели, снимок `confirmed=false`, оригинальное предсказание в `raw_predicted_traits`).

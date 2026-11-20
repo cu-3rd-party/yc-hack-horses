@@ -15,4 +15,6 @@ bin/
 *.db-wal
 data/
 coverage/
+# YOLO-веса и onnxruntime shared library — вне git (infra/scripts/download-yolo-model.sh)
+infra/models/
 .turbo/
