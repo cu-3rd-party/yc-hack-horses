@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package przewalski.sync.v1;
+
+option go_package = "github.com/cu3rd/yc-hack-horses/backend/api/gen/syncv1;syncv1";
+
+// Межнодовый протокол синхронизации. Весь mTLS — на уровне транспорта gRPC.
+service SyncService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (NodeInfo);
+  rpc ExchangeVectorClock(VectorClock) returns (VectorClock);
+  rpc PullEvents(PullEventsRequest) returns (stream EventBatch); // серверный стрим
+  rpc PushEvents(stream EventBatch) returns (AckBatch);
+  rpc RequestMissingBlobs(BlobHashList) returns (BlobHashList);
+  rpc UploadBlob(stream BlobChunk) returns (BlobAck);
+  rpc DownloadBlob(BlobHash) returns (stream BlobChunk);
+}
+
+message HandshakeRequest { string node_id = 1; string protocol_version = 2; string app_version = 3; }
+message HandshakeResponse { string node_id = 1; string protocol_version = 2; string app_version = 3; string role = 4; } // "local"|"central"
+message GetNodeInfoRequest {}
+message NodeInfo { string node_id = 1; string app_version = 2; uint64 event_count = 3; int64 last_seq = 4; string role = 5; }
+message VectorClock { map<string, uint64> clocks = 1; }
+message PullEventsRequest { VectorClock have = 1; int32 limit = 2; }
+message EventBatch { repeated Event events = 1; bool final = 2; }
+message Event {
+  string event_id = 1;
+  string node_id = 2;
+  uint64 sequence = 3;
+  string event_type = 4;
+  int32 schema_version = 5;
+  string aggregate_id = 6;
+  int64 occurred_at_unix_ms = 7;
+  bytes payload = 8; // канонический JSON
+  string payload_hash = 9;
+  string model_version = 10;
+}
+message AckBatch { repeated string ack_event_ids = 1; uint64 acked_through = 2; string node_id = 3; }
+message BlobHashList { repeated string sha256 = 1; string node_id = 2; }
+message BlobHash { string sha256 = 1; }
+message BlobChunk { string sha256 = 1; uint64 offset = 2; bytes data = 3; bool final = 4; }
+message BlobAck { string sha256 = 1; bool ok = 2; string error = 3; }

@@ -1,0 +1,27 @@
+# Пример конфигурации ноды (без секретов — реальные значения в node.yaml вне git)
+node:
+  id: ""                    # UUID, генерируется при первой инициализации, если пусто
+  data_dir: "./data"
+  role_hint: "local"        # только подсказка для CLI; central определяется hostname+mTLS, НЕ конфигом
+
+storage:
+  driver: "sqlite"          # sqlite | postgres
+  dsn: "./data/node.db"
+
+network:
+  listen_addr: "127.0.0.1:8080"      # REST/WS для локального UI — loopback по умолчанию
+  grpc_listen_addr: "0.0.0.0:9443"   # межнодовый gRPC
+  mdns_enabled: true
+  service_name: "_przewalski-node._tcp.local"
+
+security:
+  cert_file: ""             # клиентский серт ноды
+  key_file: ""
+  ca_file: ""               # CA, которому доверяем пиров
+  central_hostname: "yc-hack-horses.cu3rd.ru"
+
+sync:
+  enabled: true
+  central_url: "https://yc-hack-horses.cu3rd.ru"   # central считается только при успешной TLS-проверке этого hostname
+  batch_size: 256
+  interval: "30s"

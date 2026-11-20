@@ -1,0 +1,6 @@
+# ADR-0009: Blob storage
+**Status:** accepted
+## Решение
+Content-addressed файловое хранилище: `<data_dir>/blobs/ab/abc…(sha256)`. Фотографии не едут в JSON payload — события только ссылаются на blob (hash + mime + size). Передача blob — по gRPC чанками, возобновляемая, дедупликация по sha256, проверка целостности после приёма. S3 не нужен в V0.
+## Почему
+Простейший вариант, совместимый с мобильной ФС и Tauri sidecar.
