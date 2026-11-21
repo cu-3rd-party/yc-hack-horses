@@ -5,16 +5,16 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultsValid(t *testing.T) {
 	c := Default()
-	if err := c.Validate(); err != nil {
-		t.Fatalf("defaults must be valid: %v", err)
-	}
-	if c.Storage.Driver != "sqlite" || c.Network.ListenAddr != "127.0.0.1:8080" || c.Sync.BatchSize != 256 {
-		t.Fatalf("unexpected defaults: %+v", c)
-	}
+	require.NoError(t, c.Validate(), "defaults must be valid")
+	require.Equal(t, "sqlite", c.Storage.Driver)
+	require.Equal(t, "127.0.0.1:8080", c.Network.ListenAddr)
+	require.Equal(t, 256, c.Sync.BatchSize)
 }
 
 func TestLoadFromYAMLAndEnv(t *testing.T) {
@@ -32,33 +32,26 @@ network:
 sync:
   interval: "1m"
 `
-	if err := os.WriteFile(yamlPath, []byte(yamlContent), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0o600))
 	c, err := Load(yamlPath)
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if c.Storage.Driver != "postgres" || c.Network.ListenAddr != "127.0.0.1:9090" || c.Sync.Interval != time.Minute {
-		t.Fatalf("yaml values not applied: %+v", c)
-	}
+	require.NoError(t, err, "load")
+	require.Equal(t, "postgres", c.Storage.Driver)
+	require.Equal(t, "127.0.0.1:9090", c.Network.ListenAddr)
+	require.Equal(t, time.Minute, c.Sync.Interval)
 
 	// env переопределяет yaml
 	t.Setenv("DATABASE_URL", "postgres://env/db")
 	t.Setenv("LISTEN_ADDR", "127.0.0.1:10000")
 	t.Setenv("SYNC_INTERVAL", "5s")
 	c, err = Load(yamlPath)
-	if err != nil {
-		t.Fatalf("load with env: %v", err)
-	}
-	if c.Storage.DSN != "postgres://env/db" || c.Network.ListenAddr != "127.0.0.1:10000" || c.Sync.Interval != 5*time.Second {
-		t.Fatalf("env overrides not applied: %+v", c)
-	}
+	require.NoError(t, err, "load with env")
+	require.Equal(t, "postgres://env/db", c.Storage.DSN)
+	require.Equal(t, "127.0.0.1:10000", c.Network.ListenAddr)
+	require.Equal(t, 5*time.Second, c.Sync.Interval)
 }
 
 func TestValidationRejectsBadDriver(t *testing.T) {
 	t.Setenv("STORAGE_DRIVER", "mongodb")
-	if _, err := Load(""); err == nil {
-		t.Fatal("expected validation error for unknown driver")
-	}
+	_, err := Load("")
+	require.Error(t, err, "expected validation error for unknown driver")
 }

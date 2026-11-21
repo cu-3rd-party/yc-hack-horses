@@ -2,10 +2,11 @@ package sync_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	syncengine "github.com/cu3rd/yc-hack-horses/backend/internal/sync"
+
+	"github.com/stretchr/testify/require"
 )
 
 type fakeHandshakePeer struct {
@@ -21,15 +22,12 @@ func (f *fakeHandshakePeer) Handshake(context.Context, syncengine.HandshakeReque
 func TestHandshakeVersionCheck(t *testing.T) {
 	local := syncengine.NodeIdentity{NodeID: "a", Role: syncengine.RoleLocal, AppVersion: "1.0"}
 	ok := &fakeHandshakePeer{info: syncengine.HandshakeInfo{NodeID: "b", ProtocolVersion: syncengine.ProtocolVersion, Role: syncengine.RoleCentral}}
-	if _, err := syncengine.Handshake(context.Background(), ok, local); err != nil {
-		t.Fatalf("compatible peer rejected: %v", err)
-	}
+	_, err := syncengine.Handshake(context.Background(), ok, local)
+	require.NoError(t, err, "compatible peer rejected")
 	bad := &fakeHandshakePeer{info: syncengine.HandshakeInfo{NodeID: "b", ProtocolVersion: "0.9"}}
-	if _, err := syncengine.Handshake(context.Background(), bad, local); !errors.Is(err, syncengine.ErrProtocolVersion) {
-		t.Fatalf("want ErrProtocolVersion, got %v", err)
-	}
+	_, err = syncengine.Handshake(context.Background(), bad, local)
+	require.ErrorIs(t, err, syncengine.ErrProtocolVersion, "want ErrProtocolVersion")
 	self := &fakeHandshakePeer{info: syncengine.HandshakeInfo{NodeID: "a", ProtocolVersion: syncengine.ProtocolVersion}}
-	if _, err := syncengine.Handshake(context.Background(), self, local); err == nil {
-		t.Fatal("peer with our own node id should be rejected")
-	}
+	_, err = syncengine.Handshake(context.Background(), self, local)
+	require.Error(t, err, "peer with our own node id should be rejected")
 }
