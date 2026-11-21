@@ -7,88 +7,64 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestInitAppendStatus(t *testing.T) {
 	dir := t.TempDir()
-	if err := Init(dir); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	require.NoError(t, Init(dir), "Init")
 	defer func() { _ = Close() }()
 
 	statusJSON, err := NodeStatus()
-	if err != nil {
-		t.Fatalf("NodeStatus: %v", err)
-	}
+	require.NoError(t, err, "NodeStatus")
 	var status map[string]any
-	if err := json.Unmarshal([]byte(statusJSON), &status); err != nil {
-		t.Fatalf("status json: %v", err)
-	}
-	if status["node_id"] == "" || status["driver"] != "sqlite" {
-		t.Fatalf("unexpected status: %s", statusJSON)
-	}
+	require.NoError(t, json.Unmarshal([]byte(statusJSON), &status), "status json")
+	require.NotEqual(t, "", status["node_id"], "unexpected status: %s", statusJSON)
+	require.Equal(t, "sqlite", status["driver"], "unexpected status: %s", statusJSON)
 
 	// блоб до наблюдения: observation ссылается на его id
 	blobJSON, err := StoreBlob([]byte("photo-bytes"), "image/jpeg")
-	if err != nil {
-		t.Fatalf("StoreBlob: %v", err)
-	}
+	require.NoError(t, err, "StoreBlob")
 	var blob struct {
 		ID     string `json:"id"`
 		SHA256 string `json:"sha256"`
 	}
-	if err := json.Unmarshal([]byte(blobJSON), &blob); err != nil {
-		t.Fatalf("blob json: %v", err)
-	}
-	if blob.SHA256 == "" {
-		t.Fatalf("blob sha256 empty")
-	}
+	require.NoError(t, json.Unmarshal([]byte(blobJSON), &blob), "blob json")
+	require.NotEqual(t, "", blob.SHA256, "blob sha256 empty")
 
 	obsJSON, err := AppendObservation(`{"observer_id":"tester","location":"47.5,42.1","blob_ids":["` + blob.SHA256 + `"]}`)
-	if err != nil {
-		t.Fatalf("AppendObservation: %v", err)
-	}
+	require.NoError(t, err, "AppendObservation")
 	var obs struct {
 		ID         string   `json:"id"`
 		NodeID     string   `json:"node_id"`
 		ObserverID string   `json:"observer_id"`
 		BlobIDs    []string `json:"blob_ids"`
 	}
-	if err := json.Unmarshal([]byte(obsJSON), &obs); err != nil {
-		t.Fatalf("obs json: %v", err)
-	}
-	if obs.ID == "" || obs.NodeID == "" || len(obs.BlobIDs) != 1 {
-		t.Fatalf("unexpected observation: %s", obsJSON)
-	}
+	require.NoError(t, json.Unmarshal([]byte(obsJSON), &obs), "obs json")
+	require.NotEqual(t, "", obs.ID, "unexpected observation: %s", obsJSON)
+	require.NotEqual(t, "", obs.NodeID, "unexpected observation: %s", obsJSON)
+	require.Len(t, obs.BlobIDs, 1, "unexpected observation: %s", obsJSON)
 
 	// повторная инициализация в том же каталоге: node_id сохраняется, события не теряются
 	statusBefore := statusJSON
-	if err := Init(dir); err != nil {
-		t.Fatalf("re-Init: %v", err)
-	}
+	require.NoError(t, Init(dir), "re-Init")
 	statusJSON2, err := NodeStatus()
-	if err != nil {
-		t.Fatalf("NodeStatus 2: %v", err)
-	}
+	require.NoError(t, err, "NodeStatus 2")
 	if statusJSON2 == "" || statusJSON2 == statusBefore {
 		// node_id тот же, но event_count вырос — строки должны отличаться
 		var s2 map[string]any
 		_ = json.Unmarshal([]byte(statusJSON2), &s2)
-		if s2["event_count"].(float64) < 2 {
-			t.Fatalf("events lost after re-init: %s", statusJSON2)
-		}
+		eventCount, _ := s2["event_count"].(float64)
+		require.GreaterOrEqual(t, eventCount, 2.0, "events lost after re-init: %s", statusJSON2)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "blobs")); err != nil {
-		t.Fatalf("blobs dir: %v", err)
-	}
+	_, err = os.Stat(filepath.Join(dir, "blobs"))
+	require.NoError(t, err, "blobs dir")
 }
 
 func TestAppendObservationRequiresObserver(t *testing.T) {
-	if err := Init(t.TempDir()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	require.NoError(t, Init(t.TempDir()), "Init")
 	defer func() { _ = Close() }()
-	if _, err := AppendObservation(`{}`); err == nil {
-		t.Fatal("expected error for empty observer_id")
-	}
+	_, err := AppendObservation(`{}`)
+	require.Error(t, err, "expected error for empty observer_id")
 }
