@@ -22,3 +22,5 @@ VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["/app/node"]
 CMD ["web"]
+
+# no-op: re-delivery для обновлённого env (mTLS-переменные центральной ноды)
