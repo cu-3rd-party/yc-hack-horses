@@ -144,3 +144,4 @@ export type WsEvent =
   | { type: 'sync.peer_state'; payload: PeerStatus }
   | { type: 'node.status'; payload: NodeStatus }
   | { type: string; payload?: unknown };
+export * from './comparison';

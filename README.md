@@ -4,8 +4,7 @@
 
 ## Состав монорепозитория
 - `backend/` — Go-нода: один Sync Engine, SQLite (local) / PostgreSQL (central), REST API, gRPC sync, mTLS.
-- `app/` — React + TypeScript + Vite + shadcn/ui, Feature-Sliced Design.
-- `desktop/` — Tauri, Go-нода как sidecar.
+- `app/` — настольный полевой журнал на Electron, React, TypeScript, Tailwind CSS v4 и shadcn/ui. React Konva отображает признаки. Рабочий журнал использует HTTP API локальной Go-ноды. Демосценарии используют отдельный архив IndexedDB.
 - `mobile/` — React Native + Go Core bridge (foundation).
 - `packages/contracts/` — общие TS-типы и API-контракты.
 - `infra/` — Docker Compose, dev-сертификаты, скрипты.
@@ -18,7 +17,11 @@ Central нода определяется **только** по hostname `yc-hac
 - Центральная нода: `make compose-up` (см. `infra/compose`).
 - Dev-сертификаты: `make dev-certs` (development-only).
 - Локальная нода: `make backend && ./bin/node --config node.yaml` (см. `docs/development`).
-- Frontend: `make app-install && make app-build`.
+- Настольное приложение требует Node.js 22.12+ и npm. Из каталога `app/` выполните `npm ci`, затем `npm start`.
+- Для сборки приложения Apple Silicon выполните `npm run package:mac`. Пакет находится в `app/release/mac-arm64/yc-hack-horses.app`. Для Linux используйте `npm run package:linux`.
+- По умолчанию Electron подключается к отдельно запущенной ноде на `127.0.0.1:8080`. Работают каталог, история, оригиналы фото и ручная запись. Для экрана сравнения предусмотрен [контракт API](docs/comparison-api.md).
+- Чтобы попробовать демонстрацию, включите «Демосценарии» в настройках. В разделе «Распознавание» выберите «Табун у сопки», подтвердите первую лошадь и сохраните вторую как новую особь. Результаты появятся в галерее и журнале. Управление разовым сбоем и сброс данных находятся в настройках. Снимки, модель и сетевой обмен демонстрационные, все операции выполняются локально.
+- `npm test` проверяет поведение архива. После `npm run build` выполните `npm run test:desktop` для проверки Electron на машине с графической сессией. Переменная `JOURNAL_BINARY` позволяет проверить исполняемый файл упакованного приложения. Тест использует временный профиль.
 
 ## Локальная разработка
 
@@ -81,11 +84,11 @@ Central нода живёт в self-service как проект `yc-hack-horses`
 
 ## Релизы (тег v*)
 
+Для отдельного выпуска настольного приложения создайте на коммите frontend тег `desktop-v<версия>`. Версия должна совпадать с `app/package.json`. После отправки тега в origin Forgejo собирает клиент и публикует ZIP для Apple Silicon, AppImage и deb для Linux x86-64 и SHA256SUMS на [странице выпусков](https://git.cu3rd.ru/cu3rd/yc-hack-horses/releases). Пакет macOS подписан ad hoc. Для запуска загруженного приложения macOS может запросить подтверждение в настройках конфиденциальности и безопасности.
+
 Push тега `v*` запускает `.forgejo/workflows/release.yml`: собираются
 `backend-linux-amd64.tar.gz` (бинарь ноды + config.example.yaml + README), десктоп-клиент
-(.deb и .AppImage через tauri build; сборщик — публичный CI-образ
-`git.cu3rd.ru/cu3rd/yc-hack-horses-ci/tauri-base:latest`, исходник
-`infra/docker/tauri-base.Dockerfile`) и android APK (expo prebuild + gradle,
+(.deb и .AppImage через electron-builder) и android APK (expo prebuild + gradle,
 release-APK подписан debug-ключом — Play-ready подписи нет). Джоба
 `release-publish` создаёт **draft-релиз** через Forgejo API (секрет `RELEASE_TOKEN`
 в Actions репо) и прикладывает артефакты. Релиз остаётся черновиком — публикуй
@@ -108,8 +111,7 @@ release-APK подписан debug-ключом — Play-ready подписи н
    Перетегировать после фикса воркфлоу: `git tag -f <tag> && git push -f origin <tag>`.
 
 Грабли, отловленные на тестовом прогоне: `actions/upload-artifact@v4`/`download-artifact@v4`
-не работают на Forgejo (GHES-only) — только v3; cargo 1.83 в образе tauri-base не
-умеет `edition2024` у свежих транзитивных crates — джоба делает `rustup update stable`;
+не работают на Forgejo (GHES-only) — только v3;
 `sdkmanager` после установки cmdline-tools нужно добавлять в `PATH`; gradle в
 контейнере с лимитом памяти — `--no-daemon -Dorg.gradle.jvmargs=-Xmx2048m`.
 
