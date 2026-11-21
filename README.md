@@ -83,6 +83,8 @@ Central нода живёт в self-service как проект `yc-hack-horses`
 
 ## Релизы (тег v*)
 
+Для отдельного выпуска настольного приложения создайте на коммите frontend тег `desktop-v<версия>`. Версия должна совпадать с `app/package.json`. После отправки тега в origin Forgejo собирает клиент и публикует ZIP для Apple Silicon, AppImage и deb для Linux x86-64 и SHA256SUMS на [странице выпусков](https://git.cu3rd.ru/cu3rd/yc-hack-horses/releases). Пакет macOS подписан ad hoc. Для запуска загруженного приложения macOS может запросить подтверждение в настройках конфиденциальности и безопасности.
+
 Push тега `v*` запускает `.forgejo/workflows/release.yml`: собираются
 `backend-linux-amd64.tar.gz` (бинарь ноды + config.example.yaml + README), десктоп-клиент
 (.deb и .AppImage через electron-builder) и android APK (expo prebuild + gradle,

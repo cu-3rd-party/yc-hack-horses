@@ -1,0 +1,52 @@
+name: Desktop downloads
+
+on:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  release:
+    runs-on: homelab-docker
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-24.04
+      options: --cpus 2 --memory 4g
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check release tag
+        working-directory: app
+        env:
+          TAG: ${{ github.ref_name }}
+        run: test "$TAG" = "desktop-v$(node -p "require('./package.json').version")"
+      - name: Install dependencies
+        working-directory: app
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends binutils fakeroot libarchive-tools zip xz-utils
+          npm ci --maxsockets=4
+      - name: Check desktop client
+        working-directory: app
+        run: |
+          npm run lint
+          npm test
+      - name: Build and checksum macOS and Linux downloads
+        run: bash .ci/package-desktop.sh
+      - name: Publish release assets
+        uses: https://code.forgejo.org/actions/forgejo-release@5c6400d8716a75c2cd219f55ae9401f145209449 # v2.9.1
+        with:
+          direction: upload
+          url: ${{ github.server_url }}
+          repo: ${{ github.repository }}
+          tag: ${{ github.ref_name }}
+          sha: ${{ github.sha }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+          release-dir: app/release/downloads
+          release-notes: "Тахи для macOS (Apple Silicon) и Linux (x86-64). Для macOS скачайте ZIP, для Linux — AppImage или deb. SHA256SUMS содержит контрольные суммы."
