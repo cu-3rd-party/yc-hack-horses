@@ -19,6 +19,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
       - name: Check release tag
         working-directory: app
         env:
@@ -30,7 +34,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends binutils fakeroot libarchive-tools zip xz-utils
+          apt-get install -y --no-install-recommends binutils fakeroot libarchive-tools zip xz-utils clang lld
           npm ci --maxsockets=4
       - name: Check desktop client
         working-directory: app

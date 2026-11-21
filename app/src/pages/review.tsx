@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   Check,
@@ -8,6 +8,7 @@ import {
   CircleAlert,
   UserRoundPlus,
 } from 'lucide-react';
+import { ModelPanel, useModels } from './models';
 import { samplePhoto } from '../journal/fixtures';
 import {
   dateLabel,
@@ -45,6 +46,16 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
   const [error, setError] = useState('');
   const [emptyResult, setEmptyResult] = useState(false);
   const analyze = useCommand('/analysis');
+  const setup = useModels(Boolean(book.node));
+  const pending = useRef<File | null>(null);
+  const waiting = Boolean(book.node && (setup.isPending || setup.isError || (setup.data && !setup.data.ready)));
+  useEffect(() => {
+    const file = pending.current;
+    if (!waiting && file) {
+      pending.current = null;
+      void begin(file.name, async () => ({ upload: await importImage(file) }));
+    }
+  }, [waiting]);
   async function begin(name: string, input: () => Promise<AnalysisInput>) {
     if (locked.current) return;
     locked.current = true;
@@ -72,6 +83,13 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
       return;
     }
     const selected = files[0]!;
+    if (waiting) {
+      pending.current = selected;
+      setFileName(selected.name);
+      setError('');
+      setEmptyResult(false);
+      return;
+    }
     void begin(selected.name, async () => ({ upload: await importImage(selected) }));
   }
   const recent = [...book.observations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
@@ -81,6 +99,8 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
         title="Новое наблюдение"
         description="Загрузите снимок, чтобы найти лошадь в каталоге."
       />
+      {book.node && setup.isError && <p role="alert">Не удалось проверить модели. <button className="text-link" onClick={()=>void setup.refetch()}>Повторить</button></p>}
+      {book.node && setup.data && !setup.data.ready && <ModelPanel setup={setup.data}/>}
       <div className="intake-grid">
         <section aria-label="Загрузка фотографии">
           <h2 className="intake-label">Полевой снимок</h2>
@@ -133,6 +153,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
               <FileImage size={17} />
               <span>{fileName}</span>
               {loading && <small>Обработка</small>}
+              {waiting && pending.current && <><small>Ожидает готовности моделей</small><button className="text-link" onClick={() => {pending.current=null;setFileName('')}}>Убрать файл</button></>}
             </div>
           )}
           {error ? (

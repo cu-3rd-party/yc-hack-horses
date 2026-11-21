@@ -69,6 +69,7 @@ type Config struct {
 		// Engine — unavailable | reference | yolo (default: unavailable).
 		Engine        string `yaml:"engine"`
 		ComparisonURL string `yaml:"comparison_url"`
+		ModelBaseURL  string `yaml:"model_base_url"`
 		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
 		ModelPath string `yaml:"model_path"`
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
@@ -149,6 +150,7 @@ func (c *Config) applyEnv() {
 	envString("SYNC_CENTRAL_URL", &c.Sync.CentralURL)
 	envInt("SYNC_BATCH_SIZE", &c.Sync.BatchSize)
 	envDuration("SYNC_INTERVAL", &c.Sync.Interval)
+	envString("INFER_MODEL_BASE_URL", &c.Inference.ModelBaseURL)
 	envString("INFER_COMPARISON_URL", &c.Inference.ComparisonURL)
 	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)

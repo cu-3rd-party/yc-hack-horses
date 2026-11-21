@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	ort "github.com/yalue/onnxruntime_go"
 )
 
@@ -59,11 +60,11 @@ func session(path, input, output string) (*ort.DynamicAdvancedSession, error) {
 
 // OpenSegmenter opens only the anatomical model for masks of previously ranked crops.
 func OpenSegmenter(dir string) (*Segmenter, error) {
-	parts, err := verifiedFile(dir, "dinov2-small.onnx", "83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea")
+	parts, err := verifiedFile(dir, "dinov2-small.onnx", modelassets.DinoSHA)
 	if err != nil {
 		return nil, err
 	}
-	heads, err := verifiedFile(dir, "part-heads.f32", "a1f535819545891bd7ee01391575a9c02cdcc599da8dbf19425a980957254408")
+	heads, err := verifiedFile(dir, "part-heads.f32", modelassets.HeadsSHA)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +86,7 @@ func (e *Segmenter) Close() error { return e.parts.Destroy() }
 
 // Open requires an initialized ONNX Runtime.
 func Open(dir string) (*Encoder, error) {
-	path, err := verifiedFile(dir, "megadescriptor-l-384.onnx", "de9d5ed23423c7f6a09e0cc033c9dc645a8b672264ad22d8d776fba470eba50f")
+	path, err := verifiedFile(dir, "megadescriptor-l-384.onnx", modelassets.DescriptorSHA)
 	if err != nil {
 		return nil, err
 	}

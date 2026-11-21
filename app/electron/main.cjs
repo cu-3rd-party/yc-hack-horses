@@ -43,7 +43,8 @@ function openJournal() {
   win.loadURL(startURL);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try { await require('./local-node.cjs')(app); } catch (error) { console.error(error.message); }
   const root = path.resolve(__dirname, '../dist');
   protocol.handle('journal', async (request) => {
     const url = new URL(request.url);

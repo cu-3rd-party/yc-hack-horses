@@ -85,9 +85,14 @@ jobs:
         with:
           path: ~/.npm
           key: npm-${{ hashFiles('app/package-lock.json') }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
       - name: Check and package Electron client
         working-directory: app
         env:
+          GOMAXPROCS: '2'
           NODE_OPTIONS: --max-old-space-size=2048
         run: |
           npm ci --maxsockets=4
@@ -95,6 +100,15 @@ jobs:
           npm test
           npm run build
           npx --no-install electron-builder --linux dir --publish never
+      - name: Check Apple Silicon node cross-build
+        if: github.event_name == 'pull_request'
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends clang lld
+          bash app/scripts/build-node.sh darwin arm64
+          file app/build/node/darwin-arm64/loshid-node | grep -q arm64
 
   build-image:
     needs: [changes, build-backend]

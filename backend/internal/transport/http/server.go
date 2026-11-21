@@ -11,6 +11,7 @@ import (
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
 
@@ -20,13 +21,15 @@ import (
 
 // Deps — зависимости транспортного слоя.
 type Deps struct {
-	ComparisonModel comparison.Analyzer
-	Store           *sqlstore.Store
-	Blobs           storage.BlobStore
-	Hub             *Hub
-	NodeID          string
-	RoleHint        string
-	AppVersion      string
+	ComparisonModel        comparison.Analyzer
+	Models                 *modelassets.Manager
+	ModelMode, RuntimePath string
+	Store                  *sqlstore.Store
+	Blobs                  storage.BlobStore
+	Hub                    *Hub
+	NodeID                 string
+	RoleHint               string
+	AppVersion             string
 	// Engine — локальный CV-движок (ADR-0012); nil = UnavailableEngine:
 	// приложение не блокируется, признаки вводит человек.
 	Engine inference.InferenceEngine
@@ -74,6 +77,8 @@ func NewRouter(d Deps) http.Handler {
 
 		v1.Get("/observations", listObservations(d))
 		v1.Post("/observations", createObservation(d))
+		v1.Get("/models", modelStatus(d))
+		v1.Post("/models/{id}/{action}", changeModel(d))
 		v1.Post("/comparisons", createComparison(d))
 		v1.Put("/comparisons/{id}/detections/{detection}/decision", decideComparison(d))
 		v1.Post("/comparisons/{id}/cancel", cancelComparison(d))

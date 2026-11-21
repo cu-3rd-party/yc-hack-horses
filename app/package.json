@@ -59,6 +59,8 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/photos.zip",
+      "!**/.DS_Store",
       "electron/*.cjs"
     ],
     "mac": {
@@ -67,7 +69,21 @@
         "CFBundleDisplayName": "ЛошID"
       },
       "identity": "-",
-      "icon": "resources/icon.png"
+      "icon": "resources/icon.png",
+      "extraResources": [
+        {
+          "from": "build/node/darwin-${arch}",
+          "to": "node",
+          "filter": [
+            "loshid-node",
+            "libonnxruntime.*",
+            "LICENSE",
+            "ThirdPartyNotices.txt",
+            "migrations/sqlite/*.sql",
+            "migrations/postgres/*.sql"
+          ]
+        }
+      ]
     },
     "linux": {
       "category": "Education",
@@ -75,7 +91,22 @@
         "AppImage",
         "deb"
       ],
-      "icon": "resources/icon.png"
-    }
+      "icon": "resources/icon.png",
+      "extraResources": [
+        {
+          "from": "build/node/linux-${arch}",
+          "to": "node",
+          "filter": [
+            "loshid-node",
+            "libonnxruntime.*",
+            "LICENSE",
+            "ThirdPartyNotices.txt",
+            "migrations/sqlite/*.sql",
+            "migrations/postgres/*.sql"
+          ]
+        }
+      ]
+    },
+    "beforePack": "./scripts/build-node.cjs"
   }
 }

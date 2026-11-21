@@ -266,3 +266,32 @@ export async function saveManual(input: ManualInput) {
     blob_ids: hashes,
   });
 }
+
+export interface ModelFile {
+  id: string;
+  filename: string;
+  state: 'missing' | 'checking' | 'downloading' | 'ready' | 'error';
+  has_source: boolean;
+  size?: number;
+  received: number;
+  total: number;
+  message?: string;
+}
+export interface ModelSetup {
+  mode: 'local' | 'external' | 'disabled';
+  ready: boolean;
+  runtime_ready: boolean;
+  models: ModelFile[];
+}
+export async function getModels(signal: AbortSignal) {
+  try {
+    return await request<ModelSetup>('/models', 'GET', undefined, signal);
+  } catch (error) {
+    // Earlier nodes can serve the existing HTTP comparison contract.
+    if (error instanceof NodeError && error.status === 404) return null;
+    throw error;
+  }
+}
+export function updateModel(id: string, action: 'download' | 'cancel', url = '') {
+  return request<ModelSetup>('/models/' + encodeURIComponent(id) + '/' + action, 'POST', { url });
+}

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -283,3 +284,28 @@ func (e *Engine) Close() error {
 	e.loadErr = inference.ErrModelUnavailable
 	return err
 }
+
+// ModelsChanged retries failed lazy loads after an atomic file installation.
+func (e *Engine) ModelsChanged(dir string) {
+	e.life.Lock()
+	defer e.life.Unlock()
+	if e.loadErr != nil {
+		e.loaded = false
+		e.loadErr = nil
+	}
+	if e.cfg.ReIDModelDir == "" {
+		if _, err := os.Stat(filepath.Join(dir, "megadescriptor-l-384.onnx")); err == nil {
+			e.cfg.ReIDModelDir = dir
+		}
+	}
+	if e.encoderErr != nil {
+		e.reidOnce = sync.Once{}
+		e.encoderErr = nil
+	}
+	if e.segmentErr != nil {
+		e.segmentOnce = sync.Once{}
+		e.segmentErr = nil
+	}
+}
+
+const NativeRuntime = true
