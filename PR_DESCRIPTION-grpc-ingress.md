@@ -81,3 +81,46 @@ insecure creds + ContextDialer на httptest.NewServer с h2c):
 2. Локальная нода (dev-серты, `sync.central_url=https://yc-hack-horses.cu3rd.ru`)
    выполняет handshake через ingress, события доходят до central
    (`curl https://yc-hack-horses.cu3rd.ru/api/v1/horses`).
+
+## Итог отладки (e2e через ingress, 2026-11-21)
+
+Симптом «интерцептор видит пустой metadata» оказался не проблемой Traefik:
+заголовок `x-forwarded-tls-client-cert` доходит до h2c-бэкенда по HTTP/2
+(подтверждено warn-логом md-ключей в `grpc mux: unauthenticated request` и
+echo-подой). Реальная причина двух ступеней:
+
+1. `Unauthenticated: node certificate required` — Traefik шлёт значение как
+   base64-DER одной строкой (без PEM-обвязки); добавлен fallback в
+   `security.ParseClientCertHeader` (PEM → base64-DER).
+2. `Unauthenticated: invalid node certificate` — рассинхрон dev-CA: CA в
+   секрете пода (`yc-hack-horses-prod-web-files/ca.crt`) отличался от CA,
+   которым подписан клиентский серт локальной ноды. Выравнивание: секрет
+   перезаписан свежими файлами из `infra/scripts/gen-dev-certs.sh`
+   (ca.crt/node.crt/node.key), под перезапущен.
+
+Выбранный транспорт: **443 + h2c-мультиплекс + клиентский серт из заголовка** —
+passthrough-порт 9443 не понадобился (Traefik v3.7 заголовок на h2c не теряет).
+Проверено также по HTTP/1.1 через whoami-под: та же форма заголовка.
+
+## Guard против self-sync central
+
+Central-нода держит серверный серт (DNS SAN, без URI SAN node_id) — её
+исходящий sync-цикл вечно дёргал сам себя через ingress и писал
+`Unauthenticated: invalid node certificate` каждые 30с. `app.syncEnabledForCert`:
+если клиентский серт не несёт URI SAN node_id, sync-цикл не стартует
+(`sync loop disabled: client cert has no node identity (URI SAN)`). Для нод
+без серта (plain/loopback) поведение прежнее.
+
+## Диагностика в коде (оставлено)
+
+При отказе аутентификации gRPC-мультиплекс пишет WARN с md-ключами и
+количеством значений (без значений) и — при разобранном серте — subject/issuer/
+not_after. Не содержит персистентных данных, помогает diagnose-ingress-пути.
+
+## Финальный e2e
+
+Локальная нода (`bin/node --config /tmp/nodeA/config.yaml`, dev-серты,
+`sync.central_url=https://yc-hack-horses.cu3rd.ru`) → POST лошади по REST на
+`127.0.0.1:18080` → `sync cycle done ... sent=1` → лошадь видна на
+`https://yc-hack-horses.cu3rd.ru/api/v1/horses` (2/2 события после обоих
+рестартов central). В логах central нет `Unauthenticated`/404.
