@@ -85,42 +85,16 @@ jobs:
         with:
           path: ~/.npm
           key: npm-${{ hashFiles('app/package-lock.json') }}
-      - name: Build client bundle
+      - name: Check and package Electron client
+        working-directory: app
         env:
           NODE_OPTIONS: --max-old-space-size=2048
-        # Пока app/ не завезли фронтенд-агентом, джоба считается пройденной.
-        # working-directory не используем: несуществующий каталог валит шаг до guard-а.
         run: |
-          if [ ! -f app/package.json ]; then echo 'app/ отсутствует — skip'; exit 0; fi
-          cd app
-          npm ci --maxsockets=4 --cache ~/.npm && npm run build
-
-  build-desktop:
-    # Публичная CI-база (tauri-base: rust + webkit2gtk + npm + tauri-cli, исходник
-    # infra/docker/tauri-base.Dockerfile) — приватные образы раннеру без pull-секрета не тянутся.
-    runs-on: homelab-docker
-    container: git.cu3rd.ru/cu3rd/yc-hack-horses-ci/tauri-base:latest
-    options: --cpus 2 --memory 2g
-    env:
-      CARGO_BUILD_JOBS: '4'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build desktop sidecar
-        id: sidecar
-        run: |
-          if [ ! -f desktop/sidecar/Cargo.toml ]; then echo 'desktop/ отсутствует — skip'; exit 0; fi
-          echo 'ok=true' >> "$GITHUB_OUTPUT"
-          cd desktop/sidecar
-          cargo build
-      - name: Upload sidecar binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: yc-hack-horses-node-sidecar
-          path: desktop/sidecar/target/debug/yc-hack-horses-node-sidecar
-        if: steps.sidecar.outputs.ok == 'true'
+          npm ci --maxsockets=4
+          npm run lint
+          npm test
+          npm run build
+          npx --no-install electron-builder --linux dir
 
   build-image:
     needs: [changes, build-backend]
