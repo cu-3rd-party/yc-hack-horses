@@ -32,10 +32,12 @@ describe('локальный журнал', () => {
     const done = await command('/decisions', {
       ...match,
       horseId: null,
+      horseName: ' Искра ',
       detectionId: right!.id,
       name: 'Снимок 2.jpg',
     });
     expect(done.review).toBeNull();
+    expect(done.horses.at(-1)?.name).toBe('Искра');
     expect(done.horses).toHaveLength(initial.horses.length + 1);
     expect(horsePhotos(done, done.horses.at(-1)!.id)[0]!.annotation).toEqual(right!.annotation);
     expect(done.pending).toHaveLength(2);
@@ -64,6 +66,28 @@ describe('локальный журнал', () => {
     expect((await command('/sync', undefined)).sent).toBe(1);
     await command('/reset', undefined);
     expect(await readMedia(key)).toBeUndefined();
+  });
+  it('при отмене пропускает только оставшихся лошадей и отвязывает неиспользованное фото', async () => {
+    const book = await command('/analysis', { sample: 'pair' });
+    const review = book.review!;
+    const before = await command('/decisions', {
+      reviewId: review.id,
+      detectionId: review.detections[0]!.id,
+      horseId: 'saran',
+      name: 'Первый.jpg',
+    });
+    const after = await command('/analysis/cancel', { reviewId: review.id });
+    expect(after.review).toBeNull();
+    expect(after.observations).toEqual(before.observations);
+    expect(after.pending).toEqual(before.pending);
+    const original = new Blob(['123']);
+    const next = await command('/analysis', {
+      upload: { filename: 'След.jpg', original, preview: original },
+    });
+    await expect(command('/analysis/cancel', { reviewId: review.id })).rejects.toThrow();
+    const cancelled = await command('/analysis/cancel', { reviewId: next.review!.id });
+    expect(await readMedia(next.review!.photo.source)).toBeUndefined();
+    expect(cancelled.mediaBytes).toBe(after.mediaBytes);
   });
   it('отклоняет недопустимые названия и координаты', () => {
     for (const value of ['', 'a/b', '..', 'NUL.jpg', 'a:', 'x'.repeat(256)])

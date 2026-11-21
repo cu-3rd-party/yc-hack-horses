@@ -33,6 +33,7 @@ type Preferences = Partial<Pick<Notebook, 'online' | 'failNextSave'>>;
 interface Commands {
   '/analysis': AnalysisInput;
   '/decisions': Decision;
+  '/analysis/cancel': { reviewId: string };
   '/manual': ManualInput;
   '/preferences': Preferences;
   '/sync': undefined;
@@ -94,6 +95,29 @@ async function localRequest(route: string, payload: unknown): Promise<Notebook> 
           };
           break;
         }
+        case '/analysis/cancel': {
+          const review = book.review;
+          if (!review || review.id !== (payload as Commands['/analysis/cancel']).reviewId)
+            throw new Error('Сравнение уже завершено.');
+          const source = review.photo.source;
+          if (
+            source.startsWith('media-') &&
+            !book.observations.some((o) => o.photos.some((p) => p.source === source))
+          ) {
+            const orphan = await media.get(source);
+            if (orphan) {
+              await media.delete(source);
+              book.mediaBytes = Math.max(
+                0,
+                (book.mediaBytes ?? 0) -
+                  orphan.original.size -
+                  (orphan.original === orphan.preview ? 0 : orphan.preview.size),
+              );
+            }
+          }
+          book.review = null;
+          break;
+        }
         case '/decisions': {
           const input = payload as Decision;
           checkName(input.name);
@@ -103,11 +127,10 @@ async function localRequest(route: string, payload: unknown): Promise<Notebook> 
             throw new Error('Это наблюдение уже обработано.');
           let horseId = input.horseId;
           if (horseId === null) {
+            const name = input.horseName?.trim();
+            if (!name) throw new Error('Введите имя лошади.');
             horseId = uid();
-            book.horses.push({
-              id: horseId,
-              name: 'Особь ' + String(book.horses.length + 1).padStart(3, '0'),
-            });
+            book.horses.push({ id: horseId, name });
           } else if (!target.candidates.some((c) => c.horseId === horseId))
             throw new Error('Кандидат недоступен.');
           const photo = {

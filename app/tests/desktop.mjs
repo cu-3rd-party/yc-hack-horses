@@ -46,6 +46,10 @@ async function snap(name) {
 }
 async function match(name, creating = false) {
   await button(creating ? 'Нет подходящих' : 'Зафиксировать результат').click();
+  if (creating) {
+    assert.equal(await dialog().getByRole('button', { name: 'Подтвердить' }).isDisabled(), true);
+    await dialog().getByLabel('Имя лошади').fill('Искра');
+  }
   if (name) await dialog().getByLabel('Название наблюдения').fill(name);
   await dialog().getByRole('button', { name: 'Подтвердить' }).click();
   await dialog().waitFor({ state: 'hidden' });
@@ -53,6 +57,12 @@ async function match(name, creating = false) {
 try {
   await launch();
   await snap('home');
+  await page.evaluate(() => {
+    window.dialogAnimations = [];
+    document.addEventListener('animationstart', (e) => {
+      if (e.target.matches('.dialog,.veil,.toast')) window.dialogAnimations.push(e.animationName);
+    });
+  });
   const sidebar = page.getByRole('complementary');
   const expandedBounds = await sidebar.boundingBox();
   const workspace = await page.getByRole('main').boundingBox();
@@ -66,7 +76,14 @@ try {
   assert.equal((await sidebar.boundingBox()).width, expandedBounds.width);
   await button('Справка').click();
   await dialog().getByRole('heading', { name: 'Как пользоваться журналом' }).waitFor();
+  await page.waitForFunction(() =>
+    ['fade-in', 'surface-in'].every((name) => window.dialogAnimations.includes(name)),
+  );
   await page.keyboard.press('Escape');
+  await page.locator('.veil').waitFor({ state: 'detached' });
+  const animated = await page.evaluate(() => window.dialogAnimations);
+  for (const expected of ['fade-in', 'fade-out', 'surface-in', 'surface-out'])
+    assert.ok(animated.includes(expected), expected);
   await page.locator('.recent').first().click();
   await dialog().waitFor();
   await dialog().getByRole('button', { name: 'Открыть фото на весь экран' }).click();
@@ -110,7 +127,9 @@ try {
   await page.getByRole('button', { name: /Алтай.*83%/ }).click();
   await button('Фото — вперёд').click();
   await page.getByText('Фото 2/2', { exact: true }).waitFor();
-  await button('Выбрать фотографию кандидата').click();
+  assert.match(await leftPhoto.getAttribute('alt'), /Светлая морда/);
+  assert.equal(await page.locator('.trait-key,.open-photo').count(), 0);
+  await button('Все фото особи').click();
   await dialog().getByLabel('Поиск по названию').fill('несуществующая');
   await dialog().getByText('Фотографий по этим условиям нет.').waitFor();
   await dialog().getByLabel('Поиск по названию').fill('выпасе');
@@ -139,11 +158,14 @@ try {
   );
   await dialog().getByRole('button', { name: 'Подтвердить' }).click();
   await page.getByRole('heading', { name: 'Новое наблюдение 2' }).waitFor();
+  await page.locator('.toast:not(.error)').waitFor();
+  await button('Закрыть уведомление').click();
+  await page.locator('.toast').waitFor({ state: 'detached' });
   await match('Две особи — вторая.jpg', true);
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   await nav('Галерея особей');
   await snap('gallery');
-  await page.getByRole('button', { name: /Особь 005/ }).click();
+  await page.getByRole('button', { name: /Искра/ }).click();
   await page.getByRole('button', { name: /Две особи — вторая/ }).click();
   await dialog().getByRole('heading', { name: 'Две особи — вторая.jpg' }).waitFor();
   await page.keyboard.press('Escape');
@@ -254,6 +276,15 @@ try {
   await page.getByRole('button', { name: /На выпасе/ }).click();
   await page.getByRole('heading', { name: 'Новое наблюдение 1' }).waitFor();
   assert.equal(await button('Лошадь — вперёд').isDisabled(), true);
+  await button('Отменить сравнение').click();
+  await dialog().getByText('Оставшиеся наблюдения будут пропущены').waitFor();
+  await dialog().getByRole('button', { name: 'Отменить', exact: true }).click();
+  await dialog().waitFor({ state: 'hidden' });
+  await page.getByRole('heading', { name: 'Сравнение наблюдений' }).waitFor();
+  await button('Отменить сравнение').click();
+  await dialog().getByRole('button', { name: 'Подтвердить' }).click();
+  await dialog().waitFor({ state: 'hidden' });
+  await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   assert.deepEqual(errors, []);
   assert.deepEqual(network, []);
   console.log(

@@ -5,6 +5,8 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -37,15 +39,7 @@ export function Back({ children, onClick }: { children: ReactNode; onClick: () =
     </button>
   );
 }
-export function Modal({
-  title,
-  description,
-  children,
-  onClose,
-  busy = false,
-  wide = false,
-  fullscreen = false,
-}: {
+interface ModalProps {
   title: string;
   description?: string;
   children: ReactNode;
@@ -53,13 +47,84 @@ export function Modal({
   busy?: boolean;
   wide?: boolean;
   fullscreen?: boolean;
+}
+interface OpenDialog {
+  id: string;
+  props: ModalProps;
+  open: boolean;
+}
+const DialogContext = createContext<(id: string, props: ModalProps | null) => void>(() => {});
+
+// A save can remove the whole comparison page. Keep its dialog mounted in the
+// host until Radix finishes the exit animation and releases the focus trap.
+export function DialogHost({ children }: { children: ReactNode }) {
+  const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const update = useCallback((id: string, props: ModalProps | null) => {
+    setDialog((current) => {
+      if (props) return { id, props, open: true };
+      return current?.id === id ? { ...current, open: false } : current;
+    });
+  }, []);
+  const removeClosed = useCallback(
+    () => setDialog((current) => (current?.open ? current : null)),
+    [],
+  );
+  return (
+    <DialogContext.Provider value={update}>
+      {children}
+      {dialog && (
+        <DialogSurface
+          {...dialog.props}
+          id={dialog.id}
+          open={dialog.open}
+          afterClose={removeClosed}
+        />
+      )}
+    </DialogContext.Provider>
+  );
+}
+export function Modal(props: ModalProps) {
+  const id = useId();
+  const update = useContext(DialogContext);
+  useLayoutEffect(() => {
+    update(id, props);
+  }, [id, props, update]);
+  useLayoutEffect(() => () => update(id, null), [id, update]);
+  return null;
+}
+function DialogSurface({
+  title,
+  description,
+  children,
+  onClose,
+  busy,
+  wide,
+  fullscreen,
+  id,
+  open,
+  afterClose,
+}: ModalProps & {
+  id: string;
+  open: boolean;
+  afterClose: () => void;
 }) {
   const opener = useRef(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
+  const surface = useRef<HTMLDivElement>(null);
+  const previousId = useRef(id);
+  useLayoutEffect(() => {
+    if (previousId.current !== id) {
+      previousId.current = id;
+      const first =
+        surface.current?.querySelector<HTMLElement>('[data-dialog-focus]') ??
+        surface.current?.querySelector<HTMLButtonElement>('.dialog-close');
+      first?.focus();
+    }
+  }, [id]);
   return (
     <Dialog.Root
-      open
+      open={open}
       onOpenChange={(open) => {
         if (!open && !busy) onClose();
       }}
@@ -67,8 +132,22 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="veil" />
         <Dialog.Content
+          ref={surface}
+          inert={!open}
+          aria-hidden={!open || undefined}
+          onOpenAutoFocus={(event) => {
+            const field = surface.current?.querySelector<HTMLElement>('[data-dialog-focus]');
+            if (field) {
+              event.preventDefault();
+              field.focus();
+            }
+          }}
           onCloseAutoFocus={(event) => {
-            if (opener.current?.isConnected) {
+            afterClose();
+            if (
+              opener.current?.isConnected &&
+              !document.querySelector('[role="dialog"][data-state="open"]')
+            ) {
               event.preventDefault();
               opener.current.focus({ preventScroll: true });
             }
@@ -91,6 +170,7 @@ export function Modal({
           <div className="dialog-head">
             <Dialog.Title>{title}</Dialog.Title>
             <Button
+              className="dialog-close"
               variant="ghost"
               size="icon"
               disabled={busy}
@@ -170,25 +250,43 @@ export function Toggle({
 }
 const ToastContext = createContext<(text: string, error?: boolean) => void>(() => {});
 export function Toasts({ children }: { children: ReactNode }) {
-  const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const notify = useCallback((text: string, error = false) => {
-    clearTimeout(timer.current);
-    setToast({ text, error });
-    timer.current = setTimeout(() => setToast(null), 5000);
+  const [toast, setToast] = useState<{
+    id: number;
+    text: string;
+    error: boolean;
+    closing: boolean;
+  } | null>(null);
+  const sequence = useRef(0);
+  const dismiss = useCallback(() => {
+    setToast((old) => old && { ...old, closing: true });
   }, []);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const notify = useCallback(
+    (text: string, error = false) => {
+      clearTimeout(timer.current);
+      setToast({ id: ++sequence.current, text, error, closing: false });
+      timer.current = setTimeout(dismiss, 5000);
+    },
+    [dismiss],
+  );
   useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <ToastContext.Provider value={notify}>
       {children}
       {toast && (
         <div
+          key={toast.id}
+          data-state={toast.closing ? 'closed' : 'open'}
+          onAnimationEnd={(event) => {
+            if (event.target === event.currentTarget && toast.closing)
+              setToast((old) => (old?.id === toast.id ? null : old));
+          }}
           className={'toast' + (toast.error ? ' error' : '')}
           role={toast.error ? 'alert' : 'status'}
         >
           {toast.error ? <CircleAlert size={18} /> : <Check size={18} />}
           <span>{toast.text}</span>
-          <button aria-label="Закрыть уведомление" onClick={() => setToast(null)}>
+          <button aria-label="Закрыть уведомление" onClick={dismiss}>
             <X size={16} />
           </button>
         </div>

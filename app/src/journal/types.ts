@@ -72,6 +72,7 @@ export interface ImportPhoto {
 }
 export type AnalysisInput = { sample: 'single' | 'pair' } | { upload: ImportPhoto };
 export interface Decision {
+  horseName?: string;
   reviewId: string;
   detectionId: string;
   horseId: string | null;

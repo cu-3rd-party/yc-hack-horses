@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Stage, Layer, Line, Circle, Rect, Text } from 'react-konva';
-import { ArrowUpRight, FileText, Search, SlidersHorizontal } from 'lucide-react';
-import type { Annotation, Photo } from '../../journal/types';
+import { Stage, Layer, Group, Line, Circle, Rect, Text } from 'react-konva';
+import { FileText, Search, SlidersHorizontal } from 'lucide-react';
+import type { Annotation, Photo, Point } from '../../journal/types';
 import { usePhotoURL } from '../../journal/media';
 
 export function Thumbnail({
@@ -47,11 +47,19 @@ export function MarkedPhoto({
     dx = (width - w) / 2,
     dy = (height - h) / 2;
   const line = annotation.outline.flatMap(([x, y]) => [x * w + dx, y * h + dy]);
+  const labels = annotation.traits.map(({ label, value }) => {
+    const phrase = value.trim() + ' ' + label.toLocaleLowerCase('ru');
+    return phrase.charAt(0).toLocaleUpperCase('ru') + phrase.slice(1);
+  });
+  const marks =
+    traits && w > 0 && h > 0
+      ? placeTraitLabels(annotation, labels, { x: dx, y: dy, width: w, height: h })
+      : [];
   const picture = (
     <>
       <img
         src={src}
-        alt={photo.name}
+        alt={traits && labels.length ? photo.name + '. ' + labels.join(', ') : photo.name}
         onLoad={(e) =>
           setDimensions({
             url: src ?? '',
@@ -77,26 +85,34 @@ export function MarkedPhoto({
                   lineJoin="round"
                 />
               )}
-              {traits &&
-                annotation.traits.map(({ label, at: [x, y] }, i) => {
-                  const px = dx + x * w,
-                    py = dy + y * h,
-                    labelWidth = label.length * 7 + 14;
-                  const tx = Math.min(
-                    width - labelWidth - 3,
-                    Math.max(3, px + (i % 2 ? 9 : -labelWidth - 9)),
-                  );
-                  const ty = Math.min(height - 20, Math.max(2, py - (i % 2 ? 23 : 13)));
-                  return <LayerMark key={label} {...{ px, py, tx, ty, labelWidth, label }} />;
-                })}
+              {marks.map(({ label, px, py, tx, ty, width }) => (
+                <Line
+                  key={label}
+                  points={[px, py, tx + width / 2, ty + 10]}
+                  stroke="#fff"
+                  strokeWidth={1}
+                />
+              ))}
+              {marks.map(({ label, px, py, tx, ty, width }) => (
+                <Group key={label}>
+                  <Circle x={px} y={py} radius={3.5} fill="#fff" stroke="#242424" />
+                  <Rect x={tx} y={ty} width={width} height={19} cornerRadius={4} fill="#222" />
+                  <Text
+                    x={tx + 6}
+                    y={ty + 4}
+                    width={width - 10}
+                    wrap="none"
+                    ellipsis
+                    text={label}
+                    fontFamily="Inter"
+                    fontSize={11}
+                    fill="#fff"
+                  />
+                </Group>
+              ))}
             </Layer>
           </Stage>
         </div>
-      )}
-      {onClick && (
-        <span className="open-photo">
-          <ArrowUpRight size={16} />
-        </span>
       )}
     </>
   );
@@ -104,48 +120,75 @@ export function MarkedPhoto({
     <>
       <div className="marked" ref={box}>
         {onClick ? (
-          <button aria-label="Выбрать фотографию кандидата" onClick={onClick}>
+          <button
+            aria-label="Выбрать фотографию кандидата"
+            aria-description={traits ? labels.join(', ') : undefined}
+            onClick={onClick}
+          >
             {picture}
           </button>
         ) : (
           picture
         )}
       </div>
-      {traits && annotation.traits.length > 0 && (
-        <div className="trait-key">
-          {annotation.traits.map((t) => (
-            <span key={t.label}>
-              <b>{t.label}</b> {t.value}
-            </span>
-          ))}
-        </div>
-      )}
     </>
   );
 }
-function LayerMark({
-  px,
-  py,
-  tx,
-  ty,
-  labelWidth,
-  label,
-}: {
+interface TraitMark {
+  label: string;
   px: number;
   py: number;
   tx: number;
   ty: number;
-  labelWidth: number;
-  label: string;
-}) {
-  return (
-    <>
-      <Line points={[px, py, tx + labelWidth / 2, ty + 10]} stroke="#ffffff" strokeWidth={1} />
-      <Circle x={px} y={py} radius={3.5} fill="#ffffff" stroke="#242424" />
-      <Rect x={tx} y={ty} width={labelWidth} height={19} cornerRadius={4} fill="#222222" />
-      <Text x={tx + 6} y={ty + 4} text={label} fontFamily="Inter" fontSize={11} fill="#ffffff" />
-    </>
-  );
+  width: number;
+}
+const textMeasure = document.createElement('canvas').getContext('2d')!;
+function placeTraitLabels(
+  annotation: Annotation,
+  labels: string[],
+  image: { x: number; y: number; width: number; height: number },
+) {
+  const region: Point[] = annotation.outline.length
+    ? annotation.outline
+    : [
+        [0, 0],
+        [1, 1],
+      ];
+  const xs = region.map(([x]) => image.x + x * image.width);
+  const ys = region.map(([, y]) => image.y + y * image.height);
+  const left = Math.min(...xs),
+    right = Math.max(...xs);
+  const top = Math.min(...ys),
+    bottom = Math.max(...ys);
+  const placed: TraitMark[] = [];
+  textMeasure.font = '11px Inter';
+  const points = annotation.traits
+    .map((trait, i) => ({ at: trait.at, label: labels[i]! }))
+    .sort((a, b) => a.at[1] - b.at[1]);
+  for (const {
+    at: [x, y],
+    label,
+  } of points) {
+    const px = image.x + x * image.width,
+      py = image.y + y * image.height;
+    const width = Math.min(image.width, Math.ceil(textMeasure.measureText(label).width) + 12);
+    const tx = Math.min(
+      image.x + image.width - width,
+      Math.max(left, Math.min(px + 8, right - width)),
+    );
+    // Prefer the anchor's nearest free row inside this horse's detection.
+    const candidates = [py - 21, py + 5, ...placed.flatMap((p) => [p.ty + 21, p.ty - 21])].map(
+      (v) => Math.max(top, Math.min(v, bottom - 19)),
+    );
+    const ty =
+      candidates.find((v) =>
+        placed.every(
+          (p) => Math.abs(p.ty - v) >= 20 || tx >= p.tx + p.width + 2 || p.tx >= tx + width + 2,
+        ),
+      ) ?? candidates[0]!;
+    placed.push({ label, px, py, tx, ty, width });
+  }
+  return placed;
 }
 export function PhotoTile({
   photo,

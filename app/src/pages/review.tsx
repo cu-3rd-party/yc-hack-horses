@@ -213,22 +213,35 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
     setChoices((old) => ({ ...old, [detection.id]: { id, photo } }));
   }
   const [traits, setTraits] = useState(true),
-    [modal, setModal] = useState<'pick' | 'match' | 'new' | null>(null);
+    [modal, setModal] = useState<'pick' | 'match' | 'new' | 'cancel' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [horseNames, setHorseNames] = useState<Record<string, string>>({});
+  const horseName = horseNames[detection.id] ?? '';
   const filename = drafts[detection.id] ?? defaultName(review.photo.name, detection.number);
   const resolve = useCommand('/decisions'),
+    cancel = useCommand('/analysis/cancel'),
     notice = useNotice();
   const actionLock = useRef(false),
-    saving = resolve.isPending;
+    saving = resolve.isPending || cancel.isPending;
   async function save() {
-    if (actionLock.current || !validName(filename)) return;
+    if (
+      actionLock.current ||
+      (modal !== 'cancel' && (!validName(filename) || (modal === 'new' && !horseName.trim())))
+    )
+      return;
     actionLock.current = true;
     try {
+      if (modal === 'cancel') {
+        await cancel.mutateAsync({ reviewId: review.id });
+        notice('Сравнение отменено.');
+        return;
+      }
       await resolve.mutateAsync({
         reviewId: review.id,
         detectionId: detection.id,
         horseId: modal === 'new' ? null : candidateId,
         name: filename,
+        horseName: modal === 'new' ? horseName : undefined,
       });
       notice(
         modal === 'new'
@@ -255,6 +268,9 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
       <div className="review-toolbar">
         <Toggle label="Показать трейты" on={traits} onChange={() => setTraits((v) => !v)} />
         <div className="actions">
+          <Button className="danger-link" variant="ghost" onClick={() => setModal('cancel')}>
+            Отменить сравнение
+          </Button>
           <Button variant="outline" onClick={() => setModal('new')}>
             <UserRoundPlus size={16} />
             Нет подходящих
@@ -298,7 +314,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
           <footer>
             <button className="text-link" onClick={() => setModal('pick')}>
               <Images size={15} />
-              Все фото
+              Все фото особи
             </button>
             <Pager
               index={photoIndex}
@@ -354,6 +370,23 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
           />
         </Modal>
       )}
+      {modal === 'cancel' && (
+        <Modal
+          title="Отменить сравнение"
+          description="Оставшиеся наблюдения будут пропущены"
+          busy={saving}
+          onClose={() => setModal(null)}
+        >
+          <div className="dialog-actions">
+            <Button variant="outline" disabled={saving} onClick={() => setModal(null)}>
+              Отменить
+            </Button>
+            <Button className="danger-confirm" disabled={saving} onClick={() => void save()}>
+              Подтвердить
+            </Button>
+          </div>
+        </Modal>
+      )}
       {(modal === 'match' || modal === 'new') && (
         <Modal
           title={modal === 'match' ? 'Зафиксировать результат' : 'Нет подходящих лошадей'}
@@ -377,10 +410,22 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
               void save();
             }}
           >
+            {modal === 'new' && (
+              <label className="field">
+                Имя лошади
+                <input
+                  data-dialog-focus
+                  required
+                  value={horseName}
+                  disabled={saving}
+                  onChange={(e) => setHorseNames({ ...horseNames, [detection.id]: e.target.value })}
+                />
+              </label>
+            )}
             <label className="field">
               Название наблюдения
               <input
-                autoFocus
+                data-dialog-focus={modal === 'match' ? true : undefined}
                 aria-invalid={!validName(filename)}
                 aria-describedby={!validName(filename) ? 'decision-name-error' : undefined}
                 value={filename}
@@ -402,7 +447,9 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
               >
                 Отменить
               </Button>
-              <Button disabled={saving || !validName(filename)}>
+              <Button
+                disabled={saving || !validName(filename) || (modal === 'new' && !horseName.trim())}
+              >
                 {saving ? (
                   <>
                     <LoaderCircle size={15} className="spin" />

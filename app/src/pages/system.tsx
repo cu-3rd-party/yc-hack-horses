@@ -1,3 +1,4 @@
+import { version } from '../../package.json';
 import { useState } from 'react';
 import { Activity, Database, Images, ListChecks, RefreshCw, RotateCcw } from 'lucide-react';
 import type { Notebook } from '../journal/types';
@@ -161,7 +162,7 @@ export function Settings({ book }: { book: Notebook }) {
             ['Сертификат', 'Демонстрационный · доверенный'],
             ['Субъект сертификата', 'TAKHI-FIELD-01 · Demo CA'],
             ['Срок сертификата', '31 декабря 2028 г.'],
-            ['Версия приложения', '0.2.0'],
+            ['Версия приложения', version],
           ]}
         />
       </section>
