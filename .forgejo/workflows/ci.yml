@@ -94,7 +94,7 @@ jobs:
           npm run lint
           npm test
           npm run build
-          npx --no-install electron-builder --linux dir
+          npx --no-install electron-builder --linux dir --publish never
 
   build-image:
     needs: [changes, build-backend]

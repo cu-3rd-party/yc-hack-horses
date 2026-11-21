@@ -148,28 +148,19 @@ func TestEventsWS(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(clockFrame), `"type":"clock"`)
 
-	// событие появляется после POST
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_, eventFrame, err := conn.Read(ctx)
-		if err != nil {
-			return
-		}
-		var frame struct {
-			Type  string       `json:"type"`
-			Event domain.Event `json:"event"`
-		}
-		if json.Unmarshal(eventFrame, &frame) == nil && frame.Type == "event" {
-			require.Equal(t, domain.EventObservationAdded, frame.Event.EventType)
-		}
-	}()
-	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/observations", map[string]any{
+	// The subscription must already be live when the client receives the clock.
+	result := MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/observations", map[string]any{
 		"observer_id": "ws-tester",
 	}), http.StatusCreated)
-	select {
-	case <-done:
-	case <-ctx.Done():
-		t.Fatal("event frame not received in time")
+	observation := DecodeJSON[domain.Observation](t, result)
+	_, eventFrame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	var frame struct {
+		Type  string       `json:"type"`
+		Event domain.Event `json:"event"`
 	}
+	require.NoError(t, json.Unmarshal(eventFrame, &frame))
+	require.Equal(t, "event", frame.Type)
+	require.Equal(t, domain.EventObservationAdded, frame.Event.EventType)
+	require.Equal(t, observation.ID, frame.Event.AggregateID)
 }
