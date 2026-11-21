@@ -26,6 +26,11 @@ sync:
   batch_size: 256
   interval: "30s"
 
+api:
+  # Документация REST API (Scalar UI на /api/scalar + openapi.yaml).
+  # Включать только на central-ноде (self-service деплой); локальные ноды — false.
+  docs_enabled: false
+
 inference:
   engine: "unavailable"     # unavailable | reference | yolo (ADR-0012)
   # engine: yolo — детекция лошади YOLO ONNX + кропы; веса НЕ в git:

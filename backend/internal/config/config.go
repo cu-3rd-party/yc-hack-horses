@@ -65,6 +65,12 @@ type Config struct {
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
 		RuntimeLib string `yaml:"runtime_lib"`
 	} `yaml:"inference"`
+	// Api — HTTP API ноды.
+	Api struct {
+		// DocsEnabled — Scalar UI (/api/scalar) и OpenAPI-спека. Включается
+		// только на central-ноде; локальные ноды держат выключенным.
+		DocsEnabled bool `yaml:"docs_enabled"`
+	} `yaml:"api"`
 	LogLevel   string `yaml:"log_level"`
 	AppVersion string `yaml:"app_version"`
 }
@@ -87,6 +93,7 @@ func Default() *Config {
 	c.Sync.Interval = 30 * time.Second
 	c.LogLevel = "info"
 	c.Inference.Engine = "unavailable"
+	c.Api.DocsEnabled = false // документация — только у central-ноды
 	c.AppVersion = "0.0.1-dev"
 	return c
 }
@@ -134,6 +141,7 @@ func (c *Config) applyEnv() {
 	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
+	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)
 }

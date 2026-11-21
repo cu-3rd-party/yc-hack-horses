@@ -33,6 +33,9 @@ type Deps struct {
 	// SyncStats — снапшот счётчиков sync-движка (events_sent/received/last_sync_at
 	// по каждому пиру); nil, если sync-цикл не запущен. Отдаётся на /api/v1/node.
 	SyncStats func() any
+	// DocsEnabled — включить Scalar UI (/api/scalar) и OpenAPI-спеку.
+	// Включается только на central-ноде (api.docs_enabled / API_DOCS_ENABLED).
+	DocsEnabled bool
 }
 
 // NewRouter собирает chi-роутер со всеми маршрутами v1.
@@ -54,6 +57,9 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Get("/health", handleHealth)
 	r.Get("/readyz", handleReady(d))
+	if d.DocsEnabled {
+		mountDocs(r)
+	}
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Get("/horses", listHorses(d))
