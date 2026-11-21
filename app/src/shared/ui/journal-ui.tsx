@@ -113,6 +113,16 @@ function DialogSurface({
   );
   const surface = useRef<HTMLDivElement>(null);
   const previousId = useRef(id);
+  useEffect(() => {
+    if (!open) return;
+    // Let Chromium dismiss its open picker before Radix handles Escape on document.
+    const dismissPicker = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && surface.current?.querySelector('select:open'))
+        event.stopPropagation();
+    };
+    window.addEventListener('keydown', dismissPicker, true);
+    return () => window.removeEventListener('keydown', dismissPicker, true);
+  }, [open]);
   useLayoutEffect(() => {
     if (previousId.current !== id) {
       previousId.current = id;
@@ -150,18 +160,6 @@ function DialogSurface({
             ) {
               event.preventDefault();
               opener.current.focus({ preventScroll: true });
-            }
-          }}
-          onEscapeKeyDown={(event) => {
-            const popover = document.querySelector<HTMLElement>('[role="dialog"] :popover-open');
-            if (popover) {
-              event.preventDefault();
-              popover.hidePopover();
-              document
-                .querySelector<HTMLButtonElement>(
-                  '[popovertarget="' + CSS.escape(popover.id) + '"]',
-                )
-                ?.focus();
             }
           }}
           className={'dialog' + (fullscreen ? ' fullscreen' : wide ? ' wide' : '')}

@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Stage, Layer, Group, Line, Circle, Rect, Text } from 'react-konva';
-import { FileText, Search, SlidersHorizontal } from 'lucide-react';
+import { Aperture, FileText, Frame, ScanEye, Search, X, type LucideIcon } from 'lucide-react';
 import type { Annotation, Photo, Point } from '../../journal/types';
+import { photoQuality } from '../../journal/fixtures';
 import { usePhotoURL } from '../../journal/media';
 
 export function Thumbnail({
@@ -225,18 +226,40 @@ export function PhotoTile({
     </button>
   );
 }
-export function FilterMenu({ count, children }: { count: number; children: ReactNode }) {
-  const id = useId();
+function PhotoFilter({
+  label,
+  all,
+  icon: Icon,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  all: string;
+  icon: LucideIcon;
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <>
-      <button className="filter-trigger" popoverTarget={id}>
-        <SlidersHorizontal size={16} />
-        Фильтры{count > 0 && <b>{count}</b>}
+    <select
+      className="filter-trigger photo-filter"
+      aria-label={label}
+      data-active={Boolean(value)}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <button type="button">
+        <Icon size={16} aria-hidden="true" />
+        <span>{value || label}</span>
       </button>
-      <div id={id} popover="auto" className="filter-menu">
-        {children}
-      </div>
-    </>
+      <option value="">{all}</option>
+      {[...new Set(options)].map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </select>
   );
 }
 export function PhotoGrid({
@@ -248,12 +271,14 @@ export function PhotoGrid({
 }) {
   const [search, setSearch] = useState(''),
     [angle, setAngle] = useState(''),
-    [framing, setFraming] = useState('');
+    [framing, setFraming] = useState(''),
+    [quality, setQuality] = useState('');
   const visible = photos.filter(
     (p) =>
       p.name.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')) &&
       (!angle || p.angle === angle) &&
-      (!framing || p.framing === framing),
+      (!framing || p.framing === framing) &&
+      (!quality || photoQuality(p) === quality),
   );
   return (
     <>
@@ -267,37 +292,45 @@ export function PhotoGrid({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <FilterMenu count={Number(Boolean(angle)) + Number(Boolean(framing))}>
-          <label>
-            Ракурс
-            <select aria-label="Ракурс" value={angle} onChange={(e) => setAngle(e.target.value)}>
-              <option value="">Все ракурсы</option>
-              {[...new Set(photos.map((p) => p.angle))].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            План
-            <select aria-label="План" value={framing} onChange={(e) => setFraming(e.target.value)}>
-              <option value="">Все планы</option>
-              {[...new Set(photos.map((p) => p.framing))].map((v) => (
-                <option key={v}>{v}</option>
-              ))}
-            </select>
-          </label>
-          {(angle || framing) && (
-            <button
-              className="text-link"
-              onClick={() => {
-                setAngle('');
-                setFraming('');
-              }}
-            >
-              Сбросить фильтры
-            </button>
-          )}
-        </FilterMenu>
+        <PhotoFilter
+          label="Ракурс"
+          all="Все ракурсы"
+          icon={ScanEye}
+          options={photos.map((p) => p.angle)}
+          value={angle}
+          onChange={setAngle}
+        />
+        <PhotoFilter
+          label="План"
+          all="Все планы"
+          icon={Frame}
+          options={photos.map((p) => p.framing)}
+          value={framing}
+          onChange={setFraming}
+        />
+        <PhotoFilter
+          label="Качество"
+          all="Любое качество"
+          icon={Aperture}
+          options={photos.map(photoQuality)}
+          value={quality}
+          onChange={setQuality}
+        />
+        {(angle || framing || quality) && (
+          <button
+            type="button"
+            className="filter-clear"
+            aria-label="Сбросить фильтры"
+            title="Сбросить фильтры"
+            onClick={() => {
+              setAngle('');
+              setFraming('');
+              setQuality('');
+            }}
+          >
+            <X size={16} />
+          </button>
+        )}
       </div>
       {visible.length ? (
         <div className="photo-grid">

@@ -465,6 +465,19 @@ export const herd = [
   { id: 'altai', name: 'Алтай' },
 ];
 
+// Demo ratings belong to the bundled images, including copies saved by earlier versions.
+const demoQuality = new Map([
+  ['./photos/single.jpg', 'Высокое'],
+  ['./photos/pair.jpg', 'Среднее'],
+  ...herd.flatMap(({ id }) => [
+    [`./photos/${id}-1.jpg`, 'Высокое'] as const,
+    [`./photos/${id}-2.jpg`, 'Среднее'] as const,
+  ]),
+]);
+export function photoQuality(photo: Photo) {
+  return demoQuality.get(photo.source) ?? 'Без оценки';
+}
+
 export function samplePhoto(key: 'single' | 'pair'): Photo {
   return {
     id: key,

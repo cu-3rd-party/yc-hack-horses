@@ -268,14 +268,19 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
       <div className="review-toolbar">
         <Toggle label="Показать черты" on={traits} onChange={() => setTraits((v) => !v)} />
         <div className="actions">
-          <Button className="danger-link" variant="ghost" onClick={() => setModal('cancel')}>
+          <Button
+            size="lg"
+            className="danger-link"
+            variant="ghost"
+            onClick={() => setModal('cancel')}
+          >
             Отменить сравнение
           </Button>
-          <Button variant="outline" onClick={() => setModal('new')}>
+          <Button size="lg" variant="outline" onClick={() => setModal('new')}>
             <UserRoundPlus size={16} />
             Нет подходящих
           </Button>
-          <Button onClick={() => setModal('match')}>
+          <Button size="lg" onClick={() => setModal('match')}>
             <Check size={16} />
             Зафиксировать результат
           </Button>
@@ -378,10 +383,15 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
           onClose={() => setModal(null)}
         >
           <div className="dialog-actions">
-            <Button variant="outline" disabled={saving} onClick={() => setModal(null)}>
+            <Button size="lg" variant="outline" disabled={saving} onClick={() => setModal(null)}>
               Отменить
             </Button>
-            <Button className="danger-confirm" disabled={saving} onClick={() => void save()}>
+            <Button
+              size="lg"
+              className="danger-confirm"
+              disabled={saving}
+              onClick={() => void save()}
+            >
               Подтвердить
             </Button>
           </div>
@@ -440,6 +450,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
             )}
             <div className="dialog-actions">
               <Button
+                size="lg"
                 type="button"
                 variant="outline"
                 disabled={saving}
@@ -448,6 +459,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
                 Отменить
               </Button>
               <Button
+                size="lg"
                 disabled={saving || !validName(filename) || (modal === 'new' && !horseName.trim())}
               >
                 {saving ? (

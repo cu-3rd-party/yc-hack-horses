@@ -148,10 +148,21 @@ try {
   await dialog().getByLabel('Поиск по названию').fill('несуществующая');
   await dialog().getByText('Фотографий по этим условиям нет.').waitFor();
   await dialog().getByLabel('Поиск по названию').fill('выпасе');
-  await dialog().getByRole('button', { name: 'Фильтры' }).click();
-  await dialog().getByLabel('Ракурс').selectOption('Профиль');
-  await dialog().getByLabel('План', { exact: true }).selectOption('Общий план');
+  const angle = dialog().getByRole('combobox', { name: 'Ракурс' });
+  const framing = dialog().getByRole('combobox', { name: 'План' });
+  const quality = dialog().getByRole('combobox', { name: 'Качество' });
+  await angle.click();
+  await angle.getByRole('option', { name: 'Профиль' }).click();
+  await framing.click();
+  await framing.getByRole('option', { name: 'Общий план' }).click();
+  await quality.click();
+  await quality.getByRole('option', { name: 'Среднее' }).click();
+  await dialog().getByText('Фотографий по этим условиям нет.').waitFor();
+  await quality.click();
   await page.keyboard.press('Escape');
+  assert.equal(await quality.evaluate((el) => el.matches(':open')), false);
+  await dialog().getByRole('button', { name: 'Сбросить фильтры' }).click();
+  for (const filter of [angle, framing, quality]) assert.equal(await filter.inputValue(), '');
   await dialog()
     .getByRole('button', { name: /Алтай — на выпасе/ })
     .click();
@@ -205,9 +216,9 @@ try {
   await page.getByLabel('Значение признака', { exact: true }).fill('Тёмная');
   await button('Подставить демокоординаты').click();
   await button('Сохранить запись').click();
-  await button('Фильтры').click();
-  await page.getByRole('checkbox').check();
-  await page.keyboard.press('Escape');
+  const unlinked = button('Только без привязки');
+  await unlinked.click();
+  assert.equal(await unlinked.getAttribute('aria-pressed'), 'true');
   await page.getByRole('button', { name: /Полевой след/ }).waitFor();
   await nav('Синхронизация');
   const connection = page.getByRole('switch', { name: 'Связь с демо-узлом' });
@@ -275,6 +286,10 @@ try {
   await launch();
   await nav('Галерея особей');
   await page.getByRole('button', { name: /Сарана/ }).click();
+  const galleryQuality = page.getByRole('combobox', { name: 'Качество' });
+  await galleryQuality.click();
+  await galleryQuality.getByRole('option', { name: 'Без оценки' }).click();
+  assert.equal(await page.getByRole('button', { name: /Сарана — на выпасе/ }).count(), 0);
   await page.getByRole('button', { name: /Перетянутый снимок/ }).click();
   await page.waitForFunction(() => {
     const img = document.querySelector('[role=dialog] .marked img');

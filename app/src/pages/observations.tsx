@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { MapPin, Plus, LoaderCircle, Search, Expand } from 'lucide-react';
+import { MapPin, Plus, LoaderCircle, Search, Expand, Unlink } from 'lucide-react';
 import type { Notebook, Observation } from '../journal/types';
 import { dateLabel, describeTraits, validName } from '../journal/types';
 import { importImage } from '../journal/media';
 import { useCommand } from '../journal/use-journal';
 import { validCoordinates } from '../journal/api';
 import { Back, Heading, Modal, useNotice } from '../shared/ui/journal-ui';
-import { FilterMenu, MarkedPhoto, PhotoTile, Thumbnail } from '../shared/ui/photos';
+import { MarkedPhoto, PhotoTile, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
 
 import { Carousel } from './gallery';
@@ -46,7 +46,7 @@ export function ObservationLog({
         title="Журнал наблюдений"
         description="Полевые записи и результаты распознавания в хронологическом порядке."
         action={
-          <Button onClick={() => setManual(true)}>
+          <Button size="lg" onClick={() => setManual(true)}>
             <Plus size={16} />
             Ручная запись
           </Button>
@@ -62,16 +62,15 @@ export function ObservationLog({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <FilterMenu count={Number(unlinked)}>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={unlinked}
-              onChange={(e) => setUnlinked(e.target.checked)}
-            />
-            Только без привязки
-          </label>
-        </FilterMenu>
+        <button
+          className="filter-trigger"
+          type="button"
+          aria-pressed={unlinked}
+          onClick={() => setUnlinked(!unlinked)}
+        >
+          <Unlink size={16} aria-hidden="true" />
+          Только без привязки
+        </button>
         <small>Записей · {list.length}</small>
       </div>
       <div className="photo-grid">
@@ -317,10 +316,10 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
             />
           </label>
           <div className="dialog-actions">
-            <Button type="button" variant="outline" onClick={close}>
+            <Button size="lg" type="button" variant="outline" onClick={close}>
               Отменить
             </Button>
-            <Button disabled={!valid || busy}>
+            <Button size="lg" disabled={!valid || busy}>
               {busy && <LoaderCircle className="spin" size={15} />}Сохранить запись
             </Button>
           </div>

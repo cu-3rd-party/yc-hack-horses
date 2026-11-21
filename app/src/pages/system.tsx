@@ -199,10 +199,16 @@ export function Settings({ book }: { book: Notebook }) {
           onClose={() => setReset(false)}
         >
           <div className="dialog-actions">
-            <Button variant="outline" disabled={clear.isPending} onClick={() => setReset(false)}>
+            <Button
+              size="lg"
+              variant="outline"
+              disabled={clear.isPending}
+              onClick={() => setReset(false)}
+            >
               Отменить
             </Button>
             <Button
+              size="lg"
               disabled={clear.isPending}
               onClick={() =>
                 clear.mutate(undefined, {
