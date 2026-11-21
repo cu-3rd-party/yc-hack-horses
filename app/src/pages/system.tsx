@@ -1,3 +1,4 @@
+import { ModelPanel, useModels } from './models';
 import { setDemo, useDemo } from '../journal/mode';
 import { version } from '../../package.json';
 import { useState } from 'react';
@@ -168,6 +169,7 @@ export function Sync({ book }: { book: Notebook }) {
 }
 export function Settings({ book }: { book?: Notebook }) {
   const demo = useDemo();
+  const setup = useModels(!demo && Boolean(book?.node));
   const [theme, setTheme] = useState(initialScheme);
   const [reset, setReset] = useState(false),
     pref = useCommand('/preferences'),
@@ -204,6 +206,7 @@ export function Settings({ book }: { book?: Notebook }) {
           <Toggle label="Демосценарии" on={demo} onChange={() => setDemo(!demo)} />
         </div>
       </section>
+      {!demo && setup.data?.mode === 'local' && <ModelPanel setup={setup.data} />}
       {demo && book ? (
         <>
           <section className="panel">

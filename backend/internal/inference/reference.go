@@ -105,6 +105,8 @@ type bandMean struct{ r, g, b float64 }
 func (e ReferenceEngine) decode(ctx context.Context, input ImageInput) (image.Image, error) {
 	var data []byte
 	switch {
+	case input.Decoded != nil:
+		return input.Decoded, nil
 	case input.Reader != nil:
 		b, err := io.ReadAll(input.Reader)
 		if err != nil {

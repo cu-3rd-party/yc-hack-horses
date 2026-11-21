@@ -1,8 +1,8 @@
 // Fixed loopback destination. The renderer accesses only journal://app/api/v1/...
 const { net } = require('electron');
 const routes = {
-  GET: /^\/(?:node|horses|observations|blobs(?:\/[0-9a-f]{64})?)$/,
-  POST: /^\/(?:blobs|observations|comparisons|comparisons\/[\w-]+\/cancel)$/,
+  GET: /^\/(?:models|node|horses|observations|blobs(?:\/[0-9a-f]{64})?)$/,
+  POST: /^\/(?:models\/(?:yolo|megadescriptor|dinov2|part-heads)\/(?:download|cancel)|blobs|observations|comparisons|comparisons\/[\w-]+\/cancel)$/,
   PUT: /^\/comparisons\/[\w-]+\/detections\/[\w-]+\/decision$/,
 };
 module.exports = async function requestNode(request, url) {

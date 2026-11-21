@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 )
 
@@ -43,10 +44,15 @@ func explainMasks(input io.Reader, output io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", row.File, err)
 		}
+		annotation, err := comparison.AnnotationFromMask(*row.MaskPNG, &evidence, box, src.Bounds())
+		if err != nil {
+			return fmt.Errorf("%s: %w", row.File, err)
+		}
 		if err := enc.Encode(struct {
-			File   string             `json:"file"`
-			Traits reid.TraitEvidence `json:"traits"`
-		}{row.File, evidence}); err != nil {
+			Annotation comparison.Annotation `json:"annotation"`
+			File       string                `json:"file"`
+			Traits     reid.TraitEvidence    `json:"traits"`
+		}{annotation, row.File, evidence}); err != nil {
 			return err
 		}
 	}

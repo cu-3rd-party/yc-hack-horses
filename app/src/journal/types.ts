@@ -1,7 +1,10 @@
+import type { PartMask } from '../../../packages/contracts/src/comparison';
+
 export type Point = [number, number];
 export interface Annotation {
+  partMask?: PartMask;
   outline: Point[];
-  traits: { label: string; value: string; at?: Point; polygon?: Point[] }[];
+  traits: { key?: string; label: string; value: string; at?: Point; polygon?: Point[] }[];
 }
 export interface Photo {
   id: string;

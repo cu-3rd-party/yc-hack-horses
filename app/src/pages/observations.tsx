@@ -10,6 +10,7 @@ import { MarkedPhoto, PhotoTile, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
 import { Select } from '../shared/ui/select';
 
+import { FilterBar } from '../shared/ui/filter-bar';
 import { Carousel } from './gallery';
 export function ObservationLog({
   book,
@@ -20,10 +21,10 @@ export function ObservationLog({
   initialId?: string;
   onDismiss: () => void;
 }) {
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({ search: '', unlinked: false });
+  const { search, unlinked } = filters;
   const [fullscreen, setFullscreen] = useState(false);
-  const [manual, setManual] = useState(false),
-    [unlinked, setUnlinked] = useState(false);
+  const [manual, setManual] = useState(false);
   const [detail, setDetail] = useState<Observation | null>(
       () => book.observations.find((o) => o.id === initialId) ?? null,
     ),
@@ -53,27 +54,31 @@ export function ObservationLog({
           </Button>
         }
       />
-      <div className="filters">
-        <label className="search">
-          <Search size={16} />
-          <input
-            aria-label="Поиск наблюдений"
-            placeholder="Найти запись, фото или особь"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <button
-          className="filter-trigger"
-          type="button"
-          aria-pressed={unlinked}
-          onClick={() => setUnlinked(!unlinked)}
-        >
-          <Unlink size={16} aria-hidden="true" />
-          Только без привязки
-        </button>
-        <small>Записей · {list.length}</small>
-      </div>
+      <FilterBar value={filters} onChange={setFilters}>
+        {(draft, edit) => (
+          <>
+            <label className="search">
+              <Search size={16} />
+              <input
+                aria-label="Поиск наблюдений"
+                placeholder="Найти запись, фото или особь"
+                value={draft.search}
+                onChange={(e) => edit({ ...draft, search: e.target.value })}
+              />
+            </label>
+            <button
+              className="filter-trigger"
+              type="button"
+              aria-pressed={draft.unlinked}
+              onClick={() => edit({ ...draft, unlinked: !draft.unlinked })}
+            >
+              <Unlink size={16} aria-hidden="true" />
+              Только без привязки
+            </button>
+            <small>Записей · {list.length}</small>
+          </>
+        )}
+      </FilterBar>
       <div className="photo-grid">
         {list.map((o) => {
           const photo = o.photos[0];

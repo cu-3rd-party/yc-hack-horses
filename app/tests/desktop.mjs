@@ -316,7 +316,7 @@ try {
   const galleryQuality = page.getByRole('combobox', { name: 'Качество' });
   await galleryQuality.click();
   await galleryQuality.getByRole('option', { name: 'Без оценки' }).click();
-  assert.equal(await page.getByRole('button', { name: /Сарана — на выпасе/ }).count(), 0);
+  await page.getByRole('button', { name: /Сарана — на выпасе/ }).waitFor({ state: 'detached' });
   await page.getByRole('button', { name: /Перетянутый снимок/ }).click();
   await page.waitForFunction(() => {
     const img = document.querySelector('[role=dialog] .marked img');

@@ -251,7 +251,7 @@ func buildOpenAPISpec() []byte {
 	create.RequestBody = &requestBody{Required: true, Content: jsonContent(schemaRef("ComparisonRequest"))}
 	create.Responses = merge(stdErrors(true), map[string]resp{
 		"201": createdJSON(schemaRef("ComparisonResult")),
-		"422": {Description: "Некорректный хеш или top_k", Content: errorRef},
+		"422": {Description: "Некорректный хеш, top_k или нечитаемое изображение", Content: errorRef},
 		"502": {Description: "Некорректный ответ модели", Content: errorRef},
 		"503": {Description: "Сегментация недоступна", Content: errorRef},
 	})
@@ -373,6 +373,7 @@ func buildOpenAPISpec() []byte {
 
 	// --- components.schemas ---
 	schemas["Error"] = schemaNode{"type": "object"}.
+		prop("code", strSchema("машиночитаемый код, если известна причина")).
 		prop("message", strSchema("человекочитаемое описание ошибки")).
 		required("message")
 	schemas["Horse"] = schemaNode{"type": "object"}.

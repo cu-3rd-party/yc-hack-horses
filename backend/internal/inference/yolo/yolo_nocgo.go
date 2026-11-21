@@ -50,3 +50,7 @@ func (e *Engine) EmbedInstances(ctx context.Context, input inference.ImageInput,
 	return nil, err
 }
 func (e *Engine) Close() error { return nil }
+
+func (e *Engine) ModelsChanged(string) {}
+
+const NativeRuntime = false

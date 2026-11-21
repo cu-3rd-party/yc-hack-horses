@@ -11,6 +11,7 @@ package inference
 import (
 	"context"
 	"errors"
+	"image"
 	"io"
 )
 
@@ -40,8 +41,10 @@ type InferenceEngine interface {
 // Reader используется движками, не умеющими читать BlobStore (тесты, потоки);
 // если Reader nil и BlobStore движка не nil, данные читаются из BlobStore.
 type ImageInput struct {
-	SHA256 string    // sha256 blob'а в BlobStore
-	Reader io.Reader // опционально: прямое чтение, BlobStore не нужен
+	// Decoded is an already oriented image for a per-instance detector.
+	Decoded image.Image
+	SHA256  string    // sha256 blob'а в BlobStore
+	Reader  io.Reader // опционально: прямое чтение, BlobStore не нужен
 }
 
 // TraitResult — результат ExtractTraits.

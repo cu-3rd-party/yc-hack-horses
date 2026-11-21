@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
 	"github.com/go-chi/chi/v5"
@@ -41,7 +43,7 @@ func createComparison(d Deps) http.HandlerFunc {
 			notFoundOrServerError(w, err, "blob")
 			return
 		}
-		if d.ComparisonModel.URL == "" {
+		if d.ComparisonModel == nil {
 			writeError(w, 503, comparison.ErrUnavailable.Error())
 			return
 		}
@@ -52,9 +54,25 @@ func createComparison(d Deps) http.HandlerFunc {
 		}
 		found, err := d.ComparisonModel.Analyze(ctx, image, b.MimeType)
 		if err != nil {
-			if errors.Is(err, comparison.ErrUnavailable) {
+			switch {
+			case errors.Is(err, inference.ErrInvalidImage):
+				writeError(w, 422, "Не удалось прочитать изображение. Загрузите JPG или PNG.")
+			case errors.Is(err, inference.ErrModelUnavailable):
+				slog.Warn("local inference unavailable", "error", err)
+				writeJSON(w, 503, map[string]string{
+					"code":    "local_inference_unavailable",
+					"message": "Не удалось запустить локальную модель. Проверьте ONNX Runtime и файлы весов на ноде.",
+				})
+			case errors.Is(err, comparison.ErrLocalSegmentation):
+				slog.Warn("local comparison unavailable", "error", err)
+				writeJSON(w, 503, map[string]string{
+					"code":    "local_segmentation_unavailable",
+					"message": "Лошадь обнаружена, но её маска недоступна. Проверьте веса сегментации в INFER_REID_MODEL_DIR на ноде.",
+				})
+			case errors.Is(err, comparison.ErrUnavailable):
 				writeError(w, 503, comparison.ErrUnavailable.Error())
-			} else {
+			default:
+				slog.Error("comparison analysis failed", "error", err)
 				writeError(w, 502, "invalid segmentation model response")
 			}
 			return

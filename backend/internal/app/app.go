@@ -30,6 +30,7 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
@@ -150,18 +151,44 @@ func New(cfg *config.Config) (*App, error) {
 	// yolo — детекция YOLO ONNX + кропы (ADR-0012, V1). Движок yolo лениво
 	// грузит модель: без весов/библиотеки деградирует в ErrModelUnavailable.
 	var cvEngine inference.InferenceEngine = inference.NewUnavailable()
+	var comparisonModel comparison.Analyzer
+	var assets *modelassets.Manager
+	modelMode := "disabled"
 	switch cfg.Inference.Engine {
 	case "reference":
 		cvEngine = inference.NewReference(blobs)
 	case "yolo":
+		modelPath := cfg.Inference.ModelPath
+		if modelPath == "" {
+			modelPath = filepath.Join(cfg.Node.DataDir, "models", "yolov8n.onnx")
+		}
+		partsDir := cfg.Inference.ReIDModelDir
+		if partsDir == "" {
+			partsDir = filepath.Join(cfg.Node.DataDir, "models")
+		}
 		detector := yolo.New(yolo.Config{
-			ModelPath:      cfg.Inference.ModelPath,
+			ModelPath:      modelPath,
 			RuntimeLibPath: cfg.Inference.RuntimeLib,
 			ReIDModelDir:   cfg.Inference.ReIDModelDir,
+			IncludeMasks:   true,
 			Blobs:          blobs,
 		})
 		cvEngine = detector
+		comparisonModel = comparison.LocalModel{Detector: detector}
+		if cfg.Inference.ComparisonURL == "" {
+			modelMode = "local"
+			host, _, _ := net.SplitHostPort(cfg.Network.ListenAddr)
+			if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+				detector.ModelsChanged(partsDir)
+				assets = modelassets.New(modelPath, partsDir, cfg.Inference.ModelBaseURL, func() { detector.ModelsChanged(partsDir) })
+				a.addStop(assets.Close)
+			}
+		}
 		a.addStop(func() { _ = detector.Close() })
+	}
+	if cfg.Inference.ComparisonURL != "" {
+		modelMode = "external"
+		comparisonModel = comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL}
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:           store,
@@ -173,8 +200,9 @@ func New(cfg *config.Config) (*App, error) {
 		SyncStats:       a.syncStatsSnapshot,
 		BlobStats:       a.blobStatsSnapshot,
 		Engine:          cvEngine,
-		ComparisonModel: comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL},
-		DocsEnabled:     cfg.Api.DocsEnabled,
+		ComparisonModel: comparisonModel,
+		Models:          assets, ModelMode: modelMode, RuntimePath: cfg.Inference.RuntimeLib,
+		DocsEnabled: cfg.Api.DocsEnabled,
 	})
 	srvHandler := http.Handler(handler)
 	if cfg.Network.GRPCMultiplex {

@@ -1,6 +1,11 @@
 // Go /api/v1 comparison contract. All geometry uses the original image axes.
 export type ImagePoint = [number, number];
+export interface PartMask {
+  png: string; // Base64 indexed PNG with transparent background and anatomical part colors.
+  box: [number, number, number, number]; // Left, top, right, bottom in normalized image axes.
+}
 export interface HorseAnnotation {
+  part_mask?: PartMask;
   horse_polygon: ImagePoint[];
   traits: { key: string; value: string; polygon: ImagePoint[] | null }[];
 }

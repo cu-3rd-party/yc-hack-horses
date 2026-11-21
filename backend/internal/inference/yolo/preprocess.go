@@ -32,6 +32,8 @@ type letterboxResult struct {
 func decodeImage(ctx context.Context, blobs inference.BlobFetcher, input inference.ImageInput) (image.Image, error) {
 	var data []byte
 	switch {
+	case input.Decoded != nil:
+		return input.Decoded, nil
 	case input.Reader != nil:
 		b, err := io.ReadAll(input.Reader)
 		if err != nil {
