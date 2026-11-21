@@ -106,6 +106,13 @@ func certAuthInterceptors(caPool *x509.CertPool, log *slog.Logger) (grpc.UnarySe
 		}
 		caps := security.CapabilitiesForCert(cert, caPool, time.Now(), "")
 		if !caps.Has(minPeerCaps) {
+			// Диагностика: серт разобран, но проверку цепочки не прошёл.
+			// Логируем метаданные заголовка (без значений) и отпечаток серта.
+			log.Warn("grpc mux: invalid node certificate",
+				"subject", cert.Subject.String(),
+				"issuer", cert.Issuer.String(),
+				"not_after", cert.NotAfter.Format(time.RFC3339),
+				"md", debugMDKeys(ctx))
 			return ctx, status.Error(codes.Unauthenticated, "invalid node certificate")
 		}
 		nodeID, err := identity.NodeIDFromCert(cert)
@@ -134,6 +141,21 @@ func certAuthInterceptors(caPool *x509.CertPool, log *slog.Logger) (grpc.UnarySe
 		return handler(srv, ss)
 	}
 	return unary, stream
+}
+
+// debugMDKeys — отладочное представление входящих метаданных (только имена
+// ключей и количество значений, без самих значений).
+func debugMDKeys(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "<no md>"
+	}
+	keys := make([]string, 0, len(md))
+	for k, v := range md {
+		keys = append(keys, fmt.Sprintf("%s(%d)", k, len(v)))
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, " ")
 }
 
 // clientCertFromMD извлекает клиентский серт из входящих метаданных gRPC
