@@ -27,9 +27,9 @@ import (
 
 // nodeHTTPInfo — часть ответа /api/v1/node, нужная тестам.
 type nodeHTTPInfo struct {
-	NodeID     string           `json:"node_id"`
-	EventCount int              `json:"event_count"`
-	Sync       []map[string]any `json:"sync"`
+	NodeID     string             `json:"node_id"`
+	EventCount int                `json:"event_count"`
+	Sync       []apppkg.PeerStats `json:"sync"`
 }
 
 // e2eNode — запущенная нода в тесте.
@@ -210,6 +210,20 @@ func (n *e2eNode) nodeInfo(t *testing.T) nodeHTTPInfo {
 	return decode[nodeHTTPInfo](t, resp)
 }
 
+// The sync loop runs once at startup, before its first hourly tick. Wait for
+// that attempt to finish before measuring transfers from a manual cycle.
+func (n *e2eNode) waitForInitialSync(t *testing.T) {
+	t.Helper()
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+		peers := n.nodeInfo(t).Sync
+		if len(peers) == 1 && !peers[0].LastSyncAt.IsZero() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("initial sync did not finish on %s", n.id)
+}
+
 // syncOnce — один цикл sync ноды (как один тик runLoop).
 func (n *e2eNode) syncOnce(t *testing.T) (int, int) {
 	t.Helper()
@@ -250,6 +264,8 @@ func TestE2ETwoNodesSync(t *testing.T) {
 	nodeB := startNode(t, idB, dirB, ca, []config.PeerConfig{
 		{Addr: nodeA.grpcAddr, NodeID: idA, Host: "node-" + short(idA)},
 	}, grpcB)
+	nodeA.waitForInitialSync(t)
+	nodeB.waitForInitialSync(t)
 
 	t.Run("horse and observation sync to B", func(t *testing.T) {
 		// (а) A создаёт лошадь и наблюдение через REST
@@ -313,8 +329,8 @@ func TestE2ETwoNodesSync(t *testing.T) {
 		// (критерий 4) счётчики sync на /api/v1/node
 		info := nodeB.nodeInfo(t)
 		require.NotEmpty(t, info.Sync)
-		require.Equal(t, nodeA.grpcAddr, info.Sync[0]["addr"])
-		require.Equal(t, float64(2), info.Sync[0]["events_received"])
+		require.Equal(t, nodeA.grpcAddr, info.Sync[0].Addr)
+		require.Equal(t, 2, info.Sync[0].EventsReceived)
 	})
 
 	t.Run("resume after disconnect", func(t *testing.T) {
@@ -327,6 +343,7 @@ func TestE2ETwoNodesSync(t *testing.T) {
 			t.Fatal("node A did not stop")
 		}
 		nodeA.start(t) // тот же cfg, тот же порт gRPC
+		nodeA.waitForInitialSync(t)
 
 		resp := postJSON(t, nodeA.httpBase+"/api/v1/observations", map[string]any{
 			"observer_id": "observer-2",
@@ -436,8 +453,7 @@ func TestE2EWrongNodeIDRejected(t *testing.T) {
 	nodeC.syncOnce(t)
 	info := nodeC.nodeInfo(t)
 	require.NotEmpty(t, info.Sync)
-	lastErr, _ := info.Sync[0]["last_error"].(string)
-	require.Contains(t, lastErr, "node id")
+	require.Contains(t, info.Sync[0].LastError, "node id")
 	// при этом у B нет событий от C и наоборот
 	require.Equal(t, 0, nodeC.nodeInfo(t).EventCount)
 }

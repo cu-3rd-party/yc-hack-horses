@@ -25,6 +25,11 @@ func streamEvents(d Deps) http.HandlerFunc {
 
 		ctx := contextWithoutCancel(r.Context())
 
+		// Queue events during the initial snapshot so a client can write as
+		// soon as it receives the clock without missing the resulting event.
+		frames, unsubscribe := d.Hub.Subscribe()
+		defer unsubscribe()
+
 		clock, err := d.Store.GetVectorClock(ctx)
 		if err != nil {
 			slog.Error("ws: vector clock", "err", err)
@@ -35,9 +40,6 @@ func streamEvents(d Deps) http.HandlerFunc {
 		if err := conn.Write(ctx, websocket.MessageText, clockFrame); err != nil {
 			return
 		}
-
-		frames, unsubscribe := d.Hub.Subscribe()
-		defer unsubscribe()
 
 		// WS живёт до разрыва клиента; пинг держит соединение и проверяет живость.
 		pingTicker := time.NewTicker(20 * time.Second)
