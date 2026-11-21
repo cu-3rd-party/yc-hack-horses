@@ -11,6 +11,11 @@ storage:
 network:
   listen_addr: "127.0.0.1:8080"      # REST/WS для локального UI — loopback по умолчанию
   grpc_listen_addr: "0.0.0.0:9443"   # межнодовый gRPC
+  # grpc_multiplex: gRPC и REST на одном listen_addr (h2c). Для central-ноды
+  # за Traefik ingress: TLS терминируется на ingress, клиентский серт
+  # прокидывается middleware passTLSClientCert в X-Forwarded-Tls-Client-Cert
+  # и проверяется против security.ca_file. Требует security.ca_file.
+  grpc_multiplex: false
   mdns_enabled: true
   service_name: "_przewalski-node._tcp.local"
 
