@@ -120,3 +120,34 @@ func TestDescriptorInstallsFromButtonAndRecognizesExistingExport(t *testing.T) {
 	m.check(row)
 	require.Equal(t, "ready", m.Status()[1].State)
 }
+
+func TestPartHeadsInstallOfflineAndSurviveRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "part-heads.f32")
+	open := func() *Manager {
+		m := New(filepath.Join(dir, "yolo.onnx"), dir, "", nil)
+		t.Cleanup(m.Close)
+		require.Eventually(t, func() bool { return m.Status()[3].State != "checking" }, time.Second, time.Millisecond)
+		return m
+	}
+
+	m := open()
+	row := m.Status()[3]
+	require.True(t, row.Bundled)
+	require.True(t, row.HasSource)
+	require.Equal(t, "missing", row.State)
+	require.NoFileExists(t, path)
+	m.client = nil // Any attempt to make a network request would fail.
+	require.NoError(t, m.Start("part-heads", ""))
+	require.Eventually(t, func() bool { return m.Status()[3].State == "ready" }, time.Second, time.Millisecond)
+	payload, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Len(t, payload, 4*(384+3)*4)
+	require.Equal(t, trainedHeadsSHA, fmt.Sprintf("%x", sha256.Sum256(payload)))
+	require.Equal(t, "ready", open().Status()[3].State)
+	require.True(t, MatchesSHA(HeadsSHA, HeadsSHA))
+	require.False(t, MatchesSHA(DinoSHA, trainedHeadsSHA))
+	payload[0] ^= 1
+	require.NoError(t, os.WriteFile(path, payload, 0600))
+	require.Equal(t, "error", open().Status()[3].State)
+}

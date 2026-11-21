@@ -272,6 +272,7 @@ export interface ModelFile {
   filename: string;
   state: 'missing' | 'checking' | 'downloading' | 'ready' | 'error';
   has_source: boolean;
+  bundled?: boolean;
   size?: number;
   received: number;
   total: number;

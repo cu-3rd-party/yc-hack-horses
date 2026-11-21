@@ -40,6 +40,7 @@ function ModelRow({ file }: { file: ModelFile }) {
     },
   });
   const [name, purpose] = names[file.id] ?? [file.filename, ''];
+  const installLabel = file.bundled ? 'Установить' : 'Скачать';
   const active = file.state === 'downloading';
   const percent = file.total > 0 ? Math.min(100, 100 * file.received / file.total) : undefined;
   return (
@@ -80,11 +81,11 @@ function ModelRow({ file }: { file: ModelFile }) {
           <Button
             className="model-action model-download"
             disabled={action.isPending}
-            aria-label={'Скачать ' + name}
+            aria-label={installLabel + ' ' + name}
             onClick={() => action.mutate('download')}
           >
             <Download size={15} />
-            {file.state === 'error' ? 'Повторить' : 'Скачать'}
+            {file.state === 'error' ? 'Повторить' : installLabel}
           </Button>
         )}
       </div>

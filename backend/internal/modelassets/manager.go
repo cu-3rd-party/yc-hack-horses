@@ -2,8 +2,10 @@
 package modelassets
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -19,11 +21,21 @@ import (
 )
 
 const (
-	DetectorSHA   = "b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd"
-	DescriptorSHA = "de9d5ed23423c7f6a09e0cc033c9dc645a8b672264ad22d8d776fba470eba50f"
-	DinoSHA       = "83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea"
-	HeadsSHA      = "a1f535819545891bd7ee01391575a9c02cdcc599da8dbf19425a980957254408"
+	trainedHeadsSHA = "17766f17e8a6b8fb6741b47fbc67f25c90e097043609b2891e57b3ad82d6a92d"
+	DetectorSHA     = "b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd"
+	DescriptorSHA   = "de9d5ed23423c7f6a09e0cc033c9dc645a8b672264ad22d8d776fba470eba50f"
+	DinoSHA         = "83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea"
+	HeadsSHA        = "a1f535819545891bd7ee01391575a9c02cdcc599da8dbf19425a980957254408"
 )
+
+//go:embed part-heads.f32
+var bundledPartHeads []byte
+
+// MatchesSHA accepts the two known editions of the four-class DINOv2 head.
+// Other model types have a single pinned digest.
+func MatchesSHA(expected, digest string) bool {
+	return digest == expected || (expected == HeadsSHA && digest == trainedHeadsSHA)
+}
 
 type Status struct {
 	ID        string `json:"id"`
@@ -31,6 +43,7 @@ type Status struct {
 	State     string `json:"state"`
 	Size      int64  `json:"size,omitempty"`
 	HasSource bool   `json:"has_source"`
+	Bundled   bool   `json:"bundled,omitempty"`
 	Received  int64  `json:"received"`
 	Total     int64  `json:"total"`
 	Message   string `json:"message,omitempty"`
@@ -89,6 +102,10 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 			source = strings.TrimRight(baseURL, "/") + "/" + spec.name
 		}
 		a := &artifact{Status: Status{ID: spec.id, Filename: spec.name, State: "checking", HasSource: source != "", Size: spec.size}, modelFile: modelFile{path, spec.sha}, alternative: alternative, source: source}
+		if spec.id == "part-heads" && baseURL == "" {
+			a.Bundled = true
+			a.HasSource = true
+		}
 		m.files = append(m.files, a)
 	}
 	m.jobs.Add(1)
@@ -159,9 +176,11 @@ func (m *Manager) Start(id, link string) error {
 	if link == "" {
 		link = a.source
 	}
-	u, err := url.Parse(link)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
-		return fmt.Errorf("Нужна ссылка HTTPS на файл модели.")
+	if !a.Bundled || link != "" {
+		u, err := url.Parse(link)
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+			return fmt.Errorf("Нужна ссылка HTTPS на файл модели.")
+		}
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
 	a.cancel = cancel
@@ -207,6 +226,9 @@ type byteCounter struct{ value *atomic.Int64 }
 
 func (c byteCounter) Write(p []byte) (int, error) { c.value.Add(int64(len(p))); return len(p), nil }
 func (m *Manager) download(ctx context.Context, a *artifact, link string, customSource bool) error {
+	if a.Bundled && link == "" {
+		return m.store(ctx, a, bytes.NewReader(bundledPartHeads), int64(len(bundledPartHeads)), false)
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
 	if err != nil {
 		return fmt.Errorf("Некорректный адрес файла.")
@@ -229,17 +251,21 @@ func (m *Manager) download(ctx context.Context, a *artifact, link string, custom
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Источник вернул HTTP %d.", resp.StatusCode)
 	}
+	return m.store(ctx, a, resp.Body, resp.ContentLength, customSource)
+}
+
+func (m *Manager) store(ctx context.Context, a *artifact, source io.Reader, size int64, customSource bool) error {
 	const limit = int64(4 << 30)
-	if resp.ContentLength > limit {
+	if size > limit {
 		return fmt.Errorf("Файл превышает 4 ГБ.")
 	}
 	m.mu.Lock()
-	a.Total = max(resp.ContentLength, 0)
-	if resp.ContentLength < 0 && !customSource {
+	a.Total = max(size, 0)
+	if size < 0 && !customSource {
 		a.Total = a.Size
 	}
 	m.mu.Unlock()
-	if err = os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
 		return fmt.Errorf("Не удалось создать каталог моделей.")
 	}
 	f, err := os.CreateTemp(filepath.Dir(a.path), ".download-*")
@@ -248,12 +274,12 @@ func (m *Manager) download(ctx context.Context, a *artifact, link string, custom
 	}
 	defer os.Remove(f.Name())
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h, byteCounter{&a.received}), io.LimitReader(resp.Body, limit+1))
+	n, err := io.Copy(io.MultiWriter(f, h, byteCounter{&a.received}), io.LimitReader(source, limit+1))
 	closeErr := f.Close()
-	if err != nil || closeErr != nil || (resp.ContentLength >= 0 && n != resp.ContentLength) {
+	if err != nil || closeErr != nil || (size >= 0 && n != size) {
 		return fmt.Errorf("Загрузка прервалась. Повторите попытку.")
 	}
-	if n > limit || fmt.Sprintf("%x", h.Sum(nil)) != a.sha {
+	if n > limit || !MatchesSHA(a.sha, fmt.Sprintf("%x", h.Sum(nil))) {
 		return fmt.Errorf("Контрольная сумма не совпала. Проверьте версию файла.")
 	}
 	if err = ctx.Err(); err != nil {

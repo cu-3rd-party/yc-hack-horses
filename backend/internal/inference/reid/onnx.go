@@ -47,7 +47,7 @@ func verifiedFile(dir, name, sha string) (string, error) {
 	if _, err = io.Copy(hash, f); err != nil {
 		return "", err
 	}
-	if fmt.Sprintf("%x", hash.Sum(nil)) != sha {
+	if !modelassets.MatchesSHA(sha, fmt.Sprintf("%x", hash.Sum(nil))) {
 		return "", fmt.Errorf("reid: unexpected weights for %s", name)
 	}
 	return path, nil

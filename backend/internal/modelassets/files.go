@@ -34,7 +34,7 @@ func (file modelFile) verify() (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if fmt.Sprintf("%x", h.Sum(nil)) != file.sha {
+	if !MatchesSHA(file.sha, fmt.Sprintf("%x", h.Sum(nil))) {
 		return 0, fmt.Errorf("%w: %s", errChecksum, filepath.Base(file.path))
 	}
 	return n, nil
