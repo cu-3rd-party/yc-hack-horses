@@ -53,6 +53,20 @@ async function match(name, creating = false) {
 try {
   await launch();
   await snap('home');
+  const sidebar = page.getByRole('complementary');
+  const expandedBounds = await sidebar.boundingBox();
+  const workspace = await page.getByRole('main').boundingBox();
+  assert.ok(expandedBounds.x + expandedBounds.width <= workspace.x);
+  await button('Свернуть меню').click();
+  assert.equal((await sidebar.boundingBox()).width, 80);
+  await nav('Галерея особей');
+  assert.equal(await button('Галерея особей').getAttribute('aria-current'), 'page');
+  await nav('Распознавание');
+  await button('Развернуть меню').click();
+  assert.equal((await sidebar.boundingBox()).width, expandedBounds.width);
+  await button('Справка').click();
+  await dialog().getByRole('heading', { name: 'Как пользоваться журналом' }).waitFor();
+  await page.keyboard.press('Escape');
   await page.locator('.recent').first().click();
   await dialog().waitFor();
   await dialog().getByRole('button', { name: 'Открыть фото на весь экран' }).click();

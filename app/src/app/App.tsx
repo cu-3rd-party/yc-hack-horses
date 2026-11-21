@@ -3,6 +3,8 @@ import {
   Activity,
   Binoculars,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   CircleHelp,
   Images,
   LoaderCircle,
@@ -38,6 +40,7 @@ type Route = (typeof sections)[number]['items'][number]['key'];
 export default function App() {
   const [route, setRoute] = useState<Route>('review'),
     [help, setHelp] = useState(false),
+    [collapsed, setCollapsed] = useState(false),
     [processing, setProcessing] = useState(false),
     [logId, setLogId] = useState<string | undefined>();
   const main = useRef<HTMLElement>(null),
@@ -47,10 +50,11 @@ export default function App() {
   }, [route, book?.review?.id]);
   return (
     <div className="shell">
-      <header className="masthead">
-        <div className="mast-inner">
+      <aside className="sidebar" data-collapsed={collapsed}>
+        <div className="sidebar-head">
           <button
             className="brand"
+            title="Тахи — распознавание"
             aria-label="Тахи — распознавание"
             onClick={() => setRoute('review')}
           >
@@ -59,78 +63,88 @@ export default function App() {
             </span>
             <strong>Тахи</strong>
           </button>
-          <nav aria-label="Навигация">
-            {sections.map((section, index) => (
-              <div className={'nav-group' + (index ? ' tools' : '')} key={section.label}>
-                {section.items.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    title={label}
-                    aria-label={label}
-                    disabled={processing}
-                    aria-current={key === route ? 'page' : undefined}
-                    onClick={() => setRoute(key)}
-                  >
-                    {index > 0 && <Icon size={18} strokeWidth={1.7} />}
-                    <span>{label}</span>
-                    {key === 'sync' && !!book?.pending.length && <b>{book.pending.length}</b>}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </nav>
           <button
-            className="help"
-            title="Справка"
-            aria-label="Справка"
-            onClick={() => setHelp(true)}
+            className="sidebar-toggle"
+            aria-controls="journal-nav"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
+            onClick={() => setCollapsed(!collapsed)}
           >
-            <CircleHelp size={18} strokeWidth={1.7} />
+            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
-      </header>
-      <div className="work">
-        <main ref={main}>
-          <div className="content">
-            {error ? (
-              <div className="empty" role="alert">
-                Не удалось открыть журнал.{' '}
-                <button className="text-link" onClick={() => void refetch()}>
-                  Повторить
+        <nav id="journal-nav" aria-label="Навигация">
+          {sections.map((section) => (
+            <div className="nav-group" key={section.label}>
+              <h2>{section.label}</h2>
+              {section.items.map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  title={label}
+                  aria-label={label}
+                  disabled={processing}
+                  aria-current={key === route ? 'page' : undefined}
+                  onClick={() => setRoute(key)}
+                >
+                  <Icon size={18} strokeWidth={1.7} />
+                  <span>{label}</span>
+                  {key === 'sync' && !!book?.pending.length && <b>{book.pending.length}</b>}
                 </button>
-              </div>
-            ) : !book ? (
-              <p className="empty">
-                <LoaderCircle className="spin" /> Открываем журнал…
-              </p>
-            ) : (
-              <>
-                {route === 'review' && (
-                  <ReviewPage
-                    onBusyChange={setProcessing}
-                    book={book}
-                    openLog={(id) => {
-                      setLogId(id);
-                      setRoute('log');
-                    }}
-                  />
-                )}
-                {route === 'gallery' && <Gallery book={book} />}
-                {route === 'log' && (
-                  <ObservationLog
-                    book={book}
-                    initialId={logId}
-                    onDismiss={() => setLogId(undefined)}
-                  />
-                )}
-                {route === 'dashboard' && <Dashboard book={book} />}
-                {route === 'sync' && <Sync book={book} />}
-                {route === 'settings' && <Settings book={book} />}
-              </>
-            )}
-          </div>
-        </main>
-      </div>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <button
+          className="sidebar-help"
+          title="Справка"
+          aria-label="Справка"
+          onClick={() => setHelp(true)}
+        >
+          <CircleHelp size={18} strokeWidth={1.7} />
+          <span>Справка</span>
+        </button>
+      </aside>
+      <main className="work" ref={main}>
+        <div className="content">
+          {error ? (
+            <div className="empty" role="alert">
+              Не удалось открыть журнал.{' '}
+              <button className="text-link" onClick={() => void refetch()}>
+                Повторить
+              </button>
+            </div>
+          ) : !book ? (
+            <p className="empty">
+              <LoaderCircle className="spin" /> Открываем журнал…
+            </p>
+          ) : (
+            <>
+              {route === 'review' && (
+                <ReviewPage
+                  onBusyChange={setProcessing}
+                  book={book}
+                  openLog={(id) => {
+                    setLogId(id);
+                    setRoute('log');
+                  }}
+                />
+              )}
+              {route === 'gallery' && <Gallery book={book} />}
+              {route === 'log' && (
+                <ObservationLog
+                  book={book}
+                  initialId={logId}
+                  onDismiss={() => setLogId(undefined)}
+                />
+              )}
+              {route === 'dashboard' && <Dashboard book={book} />}
+              {route === 'sync' && <Sync book={book} />}
+              {route === 'settings' && <Settings book={book} />}
+            </>
+          )}
+        </div>
+      </main>
       {help && (
         <Modal title="Как пользоваться журналом" onClose={() => setHelp(false)}>
           <ol className="guide">
