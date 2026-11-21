@@ -3,6 +3,8 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -37,6 +39,18 @@ type BlobStore interface {
 	Delete(ctx context.Context, sha256hex string) error
 	ListMissing(ctx context.Context, hashes []string) ([]string, error) // какие запрошенные хэши отсутствуют
 	Size(ctx context.Context, sha256hex string) (int64, error)
+}
+
+// ValidSha256Hex — строка является корректным sha256-хэшем (64 hex-символа).
+// BlobStore адресуется хэшем, поэтому ссылка на legacy blob UUID в наблюдениях
+// через content-addressed канал не едет: такие ссылки надо фильтровать до
+// обращения к BlobStore (ListMissing валидирует и на невалидном хэше падает).
+func ValidSha256Hex(s string) bool {
+	if len(s) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }
 
 // Clock — точка для тестов и замены.

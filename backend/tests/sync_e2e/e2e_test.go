@@ -363,7 +363,8 @@ func TestE2ETwoNodesSync(t *testing.T) {
 	})
 
 	t.Run("blob travels over grpc", func(t *testing.T) {
-		// (г) blob загружен по REST на A, приехал на B по gRPC, sha256 совпал
+		// (г) blob загружен по REST на A и привязан к наблюдению; после обмена
+		// событиями B качает blob по потребности (неполный синк), sha256 совпал
 		payload := []byte("przewalski-photo-binary-\xf0\x9f\x90\x8e-data")
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
@@ -381,10 +382,17 @@ func TestE2ETwoNodesSync(t *testing.T) {
 		blob := decodeBlob(t, resp)
 		require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-		// цикл на A: A пушит событие blob.registered и сам blob
-		// (RequestMissingBlobs + UploadBlob)
+		// наблюдение на A ссылается на blob: для B он становится потребностью
+		resp = postJSON(t, nodeA.httpBase+"/api/v1/observations", map[string]any{
+			"observer_id": "observer-3",
+			"location":    "51N 30E",
+			"blob_ids":    []string{blob.SHA256},
+		})
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		// цикл на A: A пушит события blob.registered и observation.added
 		nodeA.syncOnce(t)
-		// цикл на B: B забирает событие blob.registered (метаданные проекции)
+		// цикл на B: B применяет события и качает недостающий blob по потребности
 		nodeB.syncOnce(t)
 
 		// blob доступен на B по REST, содержимое совпадает с исходным

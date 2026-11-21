@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
@@ -149,6 +150,7 @@ func (s *Store) GetObservation(ctx context.Context, id string) (domain.Observati
 func (s *Store) ListObservations(ctx context.Context, horseID string) ([]domain.Observation, error) {
 	return s.listObservations(ctx, horseID, true)
 }
+
 func (s *Store) listObservations(ctx context.Context, horseID string, limited bool) ([]domain.Observation, error) {
 	q := `SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name FROM observations`
 	var args []any
@@ -181,6 +183,41 @@ func (s *Store) listObservations(ctx context.Context, horseID string, limited bo
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+// ListReferencedBlobHashes возвращает уникальные blob_ids из всех наблюдений —
+// датасет, на который ссылается эта нода. Список может быть больше, чем блобов
+// на диске: часть файлов ещё не доехала (неполный синк), поэтому его нельзя
+// использовать как источник для отправки, только как список потребностей.
+func (s *Store) ListReferencedBlobHashes(ctx context.Context) ([]string, error) {
+	rows, err := s.query(ctx, `SELECT blob_ids FROM observations WHERE blob_ids != '[]'`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: list referenced blob hashes: %w", err)
+	}
+	defer rows.Close()
+	seen := map[string]struct{}{}
+	var out []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("sqlstore: scan observation blob_ids: %w", err)
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+			return nil, fmt.Errorf("sqlstore: parse observation blob_ids: %w", err)
+		}
+		for _, id := range ids {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				out = append(out, id)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: list referenced blob hashes: %w", err)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // CreateTraitSnapshot добавляет снимок признаков.

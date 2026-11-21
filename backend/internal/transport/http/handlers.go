@@ -355,6 +355,9 @@ func nodeInfo(d Deps) http.HandlerFunc {
 		if d.SyncStats != nil {
 			out["sync"] = d.SyncStats()
 		}
+		if d.BlobStats != nil {
+			out["blobs"] = d.BlobStats()
+		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }

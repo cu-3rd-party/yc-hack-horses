@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/contract"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
@@ -34,6 +35,46 @@ func TestEventStoreContract(t *testing.T) {
 		dsn := filepath.Join(t.TempDir(), "test.db")
 		return openStore(t, dsn), func() storage.EventStore { return openStore(t, dsn) }
 	})
+}
+
+// TestListReferencedBlobHashes — реестр blob-ссылок наблюдений: уникальные
+// хэши из всех наблюдений, включая те, чьих файлов ещё нет на диске.
+func TestListReferencedBlobHashes(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, filepath.Join(t.TempDir(), "test.db"))
+	obs := domain.Observation{
+		ID:         "obs-1",
+		NodeID:     "node-a",
+		ObserverID: "observer-1",
+		Location:   "loc",
+		BlobIDs:    []string{"hash-1", "hash-2", "hash-1"},
+	}
+	if err := s.CreateObservation(ctx, obs); err != nil {
+		t.Fatalf("create observation: %v", err)
+	}
+	obs2 := domain.Observation{
+		ID:         "obs-2",
+		NodeID:     "node-a",
+		ObserverID: "observer-1",
+		Location:   "loc",
+		BlobIDs:    []string{"hash-2", "hash-3"},
+	}
+	if err := s.CreateObservation(ctx, obs2); err != nil {
+		t.Fatalf("create observation 2: %v", err)
+	}
+	got, err := s.ListReferencedBlobHashes(ctx)
+	if err != nil {
+		t.Fatalf("list referenced blob hashes: %v", err)
+	}
+	want := []string{"hash-1", "hash-2", "hash-3"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i, h := range want {
+		if got[i] != h {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], h)
+		}
+	}
 }
 
 func TestBlobStoreContract(t *testing.T) {

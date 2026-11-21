@@ -34,6 +34,11 @@ type node struct {
 
 func newNode(t *testing.T, id string) *node {
 	t.Helper()
+	return newNodeCfg(t, id, syncengine.Config{BatchLimit: 3, ChunkSize: 1024})
+}
+
+func newNodeCfg(t *testing.T, id string, cfg syncengine.Config) *node {
+	t.Helper()
 	events := newFakeEventStore()
 	blobs := newFakeBlobStore()
 	identity := syncengine.NodeIdentity{NodeID: id, Role: syncengine.RoleLocal, AppVersion: "test-1.0"}
@@ -58,8 +63,7 @@ func newNode(t *testing.T, id string) *node {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	client := grpctransport.NewClient(syncv1.NewSyncServiceClient(conn), nil)
-	engine := syncengine.NewEngine(events, blobs, identity,
-		syncengine.Config{BatchLimit: 3, ChunkSize: 1024}, slog.Default())
+	engine := syncengine.NewEngine(events, blobs, identity, cfg, slog.Default())
 	return &node{engine: engine, events: events, blobs: blobs, client: client}
 }
 
@@ -176,14 +180,6 @@ func (s *brokenSink) Send(events []domain.Event) error {
 
 func (s *brokenSink) Close() (syncengine.Ack, error) {
 	return s.inner.Close()
-}
-
-func (p *brokenPushPeer) RequestMissingBlobs(ctx context.Context, hashes []string) ([]string, error) {
-	return p.inner.RequestMissingBlobs(ctx, hashes)
-}
-
-func (p *brokenPushPeer) UploadBlob(ctx context.Context, sha256hex string, r io.Reader) error {
-	return p.inner.UploadBlob(ctx, sha256hex, r)
 }
 
 func (p *brokenPushPeer) DownloadBlob(ctx context.Context, sha256hex string) (io.ReadCloser, error) {
@@ -324,4 +320,104 @@ func (c *chunkedReader) Read(p []byte) (int, error) {
 	copy(p[:n], c.data[c.offset:c.offset+n])
 	c.offset += n
 	return n, nil
+}
+
+// TestBlobSyncPullOnlyNeeded — неполный синк по потребности: движок качает
+// с пира только blob'ы из NeededBlobHashes, которых нет локально; чужие blob'ы
+// не затягиваются.
+func TestBlobSyncPullOnlyNeeded(t *testing.T) {
+	a := newNode(t, "node-a")
+	needed := []byte("dataset blob")
+	neededHash := hexHash(needed)
+	unwanted := []byte("unwanted blob")
+	unwantedHash := hexHash(unwanted)
+	if err := a.blobs.Put(context.Background(), neededHash, "image/jpeg", needed); err != nil {
+		t.Fatalf("put needed blob on a: %v", err)
+	}
+	if err := a.blobs.Put(context.Background(), unwantedHash, "image/jpeg", unwanted); err != nil {
+		t.Fatalf("put unwanted blob on a: %v", err)
+	}
+
+	b := newNodeCfg(t, "node-b", syncengine.Config{
+		BatchLimit: 3,
+		ChunkSize:  1024,
+		NeededBlobHashes: func(context.Context) ([]string, error) {
+			return []string{neededHash}, nil
+		},
+	})
+	if _, _, err := b.engine.Sync(context.Background(), a.client); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	got, err := b.blobs.Get(context.Background(), neededHash)
+	if err != nil {
+		t.Fatalf("needed blob not pulled: %v", err)
+	}
+	if string(got) != string(needed) {
+		t.Fatal("needed blob content mismatch")
+	}
+	ok, err := b.blobs.Has(context.Background(), unwantedHash)
+	if err != nil {
+		t.Fatalf("has unwanted: %v", err)
+	}
+	if ok {
+		t.Fatal("unwanted blob must not be pulled")
+	}
+}
+
+// TestBlobSyncCapPerCycle — за один цикл качается не больше MaxBlobsPerSync,
+// недостающее добирается следующими циклами.
+func TestBlobSyncCapPerCycle(t *testing.T) {
+	a := newNode(t, "node-a")
+	var hashes []string
+	for i := range 3 {
+		data := []byte{byte('a' + i)}
+		h := hexHash(data)
+		hashes = append(hashes, h)
+		if err := a.blobs.Put(context.Background(), h, "image/jpeg", data); err != nil {
+			t.Fatalf("put blob %d: %v", i, err)
+		}
+	}
+	b := newNodeCfg(t, "node-b", syncengine.Config{
+		BatchLimit:      3,
+		ChunkSize:       1024,
+		MaxBlobsPerSync: 2,
+		NeededBlobHashes: func(context.Context) ([]string, error) {
+			return hashes, nil
+		},
+	})
+	if _, _, err := b.engine.Sync(context.Background(), a.client); err != nil {
+		t.Fatalf("sync 1: %v", err)
+	}
+	for i, h := range hashes[:2] {
+		if ok, err := b.blobs.Has(context.Background(), h); err != nil || !ok {
+			t.Fatalf("blob %d (%s) should be pulled: has=%v err=%v", i, h, ok, err)
+		}
+	}
+	if ok, err := b.blobs.Has(context.Background(), hashes[2]); err != nil {
+		t.Fatalf("has blob 3: %v", err)
+	} else if ok {
+		t.Fatal("blob 3 must not be pulled in the capped cycle")
+	}
+	if _, _, err := b.engine.Sync(context.Background(), a.client); err != nil {
+		t.Fatalf("sync 2: %v", err)
+	}
+	if ok, err := b.blobs.Has(context.Background(), hashes[2]); err != nil || !ok {
+		t.Fatalf("blob 3 should be pulled on the next cycle: has=%v err=%v", ok, err)
+	}
+}
+
+// TestBlobSyncMissingAtPeerTolerated — blob, которого нет и у пира, не срывает
+// цикл синхронизации: неполный датасет — штатное состояние.
+func TestBlobSyncMissingAtPeerTolerated(t *testing.T) {
+	a := newNode(t, "node-a")
+	b := newNodeCfg(t, "node-b", syncengine.Config{
+		BatchLimit: 3,
+		ChunkSize:  1024,
+		NeededBlobHashes: func(context.Context) ([]string, error) {
+			return []string{hexHash([]byte("never uploaded"))}, nil
+		},
+	})
+	if _, _, err := b.engine.Sync(context.Background(), a.client); err != nil {
+		t.Fatalf("missing blob at peer must not fail sync: %v", err)
+	}
 }

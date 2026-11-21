@@ -57,9 +57,14 @@ type Config struct {
 	RPCTimeout time.Duration
 	// MaxRounds — число циклов обмена событиями за один Sync. 0 = 8.
 	MaxRounds int
-	// KnownBlobHashes — источник хэшей blobs, известных этой ноде (обычно из
-	// blob.registered событий или реестра BlobStore). nil = blob-синхронизация off.
-	KnownBlobHashes func(ctx context.Context) ([]string, error)
+	// MaxBlobsPerSync — максимум blob'ов, скачиваемых за один цикл Sync.
+	// Ограничивает трафик: датасет может быть на много порядков больше, чем
+	// наблюдений, поэтому доливается постепенно, за несколько циклов. 0 = 64.
+	MaxBlobsPerSync int
+	// NeededBlobHashes — хэши blob'ов, на которые ссылается эта нода
+	// (наблюдения локального лога). Синк — неполный и по потребности: движок
+	// качает только недостающие из списка, а не весь реестр. nil = blob-синхронизация off.
+	NeededBlobHashes func(ctx context.Context) ([]string, error)
 }
 
 func (c Config) batchLimit() int {
@@ -90,6 +95,13 @@ func (c Config) maxRounds() int {
 	return c.MaxRounds
 }
 
+func (c Config) maxBlobsPerSync() int {
+	if c.MaxBlobsPerSync <= 0 {
+		return 64
+	}
+	return c.MaxBlobsPerSync
+}
+
 // Peer — транспортный клиент пира. Реализуется gRPC-адаптером
 // (internal/transport/grpc) и фейками в тестах. Таймауты применяет реализация.
 type Peer interface {
@@ -100,10 +112,6 @@ type Peer interface {
 	PullEvents(ctx context.Context, have storage.VectorClock, limit int, yield func([]domain.Event) error) error
 	// PushEvents открывает клиентский стрим: sink.Send батчами, Close отдаёт ACK.
 	PushEvents(ctx context.Context) (PeerEventSink, error)
-	// RequestMissingBlobs возвращает подмножество hashes, которых нет у пира.
-	RequestMissingBlobs(ctx context.Context, hashes []string) ([]string, error)
-	// UploadBlob передаёт blob целиком; данные читаются из r чанками.
-	UploadBlob(ctx context.Context, sha256hex string, r io.Reader) error
 	// DownloadBlob возвращает reader с содержимым blob пира.
 	DownloadBlob(ctx context.Context, sha256hex string) (io.ReadCloser, error)
 }

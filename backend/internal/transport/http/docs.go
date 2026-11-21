@@ -425,6 +425,7 @@ func buildOpenAPISpec() []byte {
 		prop("vector_clock", schemaNode{"type": "object", "additionalProperties": schemaNode{"type": "integer"}, "description": "векторное время ноды"}).
 		prop("driver", strSchema("sqlite | postgres")).
 		prop("sync", schemaNode{"type": "object", "description": "счётчики sync-движка, если запущен"}).
+		prop("blobs", schemaNode{"type": "object", "description": "состояние блобов: referenced/present/missing (неполный синк)"}).
 		required("node_id", "app_version", "role_hint", "event_count", "last_seq", "driver")
 	schemas["CreateObservationRequest"] = schemaNode{"type": "object"}.
 		prop("horse_id", strSchema("опционально")).

@@ -30,6 +30,7 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -131,8 +132,11 @@ func New(cfg *config.Config) (*App, error) {
 	pstore := newProjectedStore(store)
 	engine := syncengine.NewEngine(pstore, blobs, identity, syncengine.Config{
 		BatchLimit: cfg.Sync.BatchSize,
-		KnownBlobHashes: func(ctx context.Context) ([]string, error) {
-			return blobHashes(ctx, store)
+		// Неполный синк (issue #17): качаем только blob'ы, на которые ссылается
+		// эта нода, и не больше MaxBlobsPerSync за цикл — датасет 16ГБ целиком
+		// по всем устройствам не гоняем.
+		NeededBlobHashes: func(ctx context.Context) ([]string, error) {
+			return referencedBlobHashes(ctx, store)
 		},
 	}, slog.Default())
 
@@ -167,6 +171,7 @@ func New(cfg *config.Config) (*App, error) {
 		RoleHint:        cfg.Node.RoleHint,
 		AppVersion:      cfg.AppVersion,
 		SyncStats:       a.syncStatsSnapshot,
+		BlobStats:       a.blobStatsSnapshot,
 		Engine:          cvEngine,
 		ComparisonModel: comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL},
 		DocsEnabled:     cfg.Api.DocsEnabled,
@@ -196,17 +201,38 @@ func New(cfg *config.Config) (*App, error) {
 	return a, nil
 }
 
-// blobHashes — источник хэшей blobs для blob-синхронизации движка.
-func blobHashes(ctx context.Context, store *sqlstore.Store) ([]string, error) {
-	bs, err := store.ListBlobs(ctx)
+// referencedBlobHashes — хэши blob'ов, на которые ссылается эта нода
+// (наблюдения локального лога). Источник потребностей для неполного
+// blob-синха: движок качает только недостающие из этого списка.
+func referencedBlobHashes(ctx context.Context, store *sqlstore.Store) ([]string, error) {
+	return store.ListReferencedBlobHashes(ctx)
+}
+
+// blobStatsSnapshot — срез состояния блобов для /api/v1/node: сколько ссылок
+// из наблюдений и сколько из них ещё не на диске (неполный синк). Legacy-ссылки
+// на blob UUID в missing не считаются: через content-addressed канал не едут.
+func (a *App) blobStatsSnapshot() any {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	hashes, err := a.store.ListReferencedBlobHashes(ctx)
 	if err != nil {
-		return nil, err
+		return map[string]any{"error": err.Error()}
 	}
-	out := make([]string, 0, len(bs))
-	for _, b := range bs {
-		out = append(out, b.SHA256)
+	var valid []string
+	for _, h := range hashes {
+		if storage.ValidSha256Hex(h) {
+			valid = append(valid, h)
+		}
 	}
-	return out, nil
+	missing, err := a.blobs.ListMissing(ctx, valid)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	return map[string]any{
+		"referenced": len(hashes),
+		"present":    len(valid) - len(missing),
+		"missing":    len(missing),
+	}
 }
 
 // migrationsDir ищет каталог migrations/ рядом с бинарником и в рабочей директории.

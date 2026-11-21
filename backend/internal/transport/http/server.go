@@ -35,6 +35,9 @@ type Deps struct {
 	// SyncStats — снапшот счётчиков sync-движка (events_sent/received/last_sync_at
 	// по каждому пиру); nil, если sync-цикл не запущен. Отдаётся на /api/v1/node.
 	SyncStats func() any
+	// BlobStats — срез состояния блобов (referenced/present/missing) для
+	// /api/v1/node; nil, если blob-синхронизация не запущена.
+	BlobStats func() any
 	// DocsEnabled — включить Scalar UI (/api/scalar) и OpenAPI-спеку.
 	// Включается только на central-ноде (api.docs_enabled / API_DOCS_ENABLED).
 	DocsEnabled bool

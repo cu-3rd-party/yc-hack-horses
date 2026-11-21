@@ -6,45 +6,47 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 )
 
-// syncBlobs доводит blobs до обеих сторон: отдаём пиру те, которых у него нет,
-// и забираем те, которых нет у нас (пир перечисляет недостающее через наш же
-// вызов RequestMissingBlobs при его цикле Sync — протокол симметричный).
+// syncBlobs — неполный синк по потребности: качаем с пира только blob'ы, на
+// которые ссылается эта нода (наблюдения), но которых нет на диске. Датасет
+// может быть на порядки больше, чем наблюдений (ADR-0009), поэтому целиком
+// реплицировать его нельзя: недостающие доливаются постепенно, не больше
+// cfg.MaxBlobsPerSync за цикл. Blob, которого нет и у пира, пропускается —
+// он останется в списке недостающих до следующего цикла.
 func (e *Engine) syncBlobs(ctx context.Context, peer Peer) error {
-	if e.blobs == nil || e.cfg.KnownBlobHashes == nil {
+	if e.blobs == nil || e.cfg.NeededBlobHashes == nil {
 		return nil
 	}
-	hashes, err := e.cfg.KnownBlobHashes(ctx)
+	needed, err := e.cfg.NeededBlobHashes(ctx)
 	if err != nil {
-		return fmt.Errorf("list known blob hashes: %w", err)
+		return fmt.Errorf("list needed blob hashes: %w", err)
 	}
-	if len(hashes) == 0 {
-		return nil
-	}
-	missingAtPeer, err := peer.RequestMissingBlobs(ctx, hashes)
-	if err != nil {
-		return fmt.Errorf("query missing blobs at peer: %w", err)
-	}
-	for _, h := range missingAtPeer {
-		if err := e.uploadBlob(ctx, peer, h); err != nil {
-			return err
+	// Legacy-ссылки на blob UUID в наблюдениях через content-addressed канал
+	// не едут — фильтруем до ListMissing, иначе он падает на невалидном хэше.
+	var valid []string
+	for _, h := range needed {
+		if storage.ValidSha256Hex(h) {
+			valid = append(valid, h)
 		}
 	}
-	// Недостающие у нас: пира просим отдать их через DownloadBlob — но список
-	// хэшей пира получаем зеркально: он сам запустит Sync и дольёт нас.
-	return nil
-}
-
-// uploadBlob читает локальный blob и передаёт его пиру чанками.
-// Повторная передача существующего blob — no-op (дедупликация по sha256).
-func (e *Engine) uploadBlob(ctx context.Context, peer Peer, sha256hex string) error {
-	data, err := e.blobs.Get(ctx, sha256hex)
-	if err != nil {
-		return fmt.Errorf("read blob %s: %w", sha256hex, err)
+	if len(valid) == 0 {
+		return nil
 	}
-	if err := peer.UploadBlob(ctx, sha256hex, newChunkReader(data, e.cfg.chunkSize())); err != nil {
-		return fmt.Errorf("upload blob %s: %w", sha256hex, err)
+	missing, err := e.blobs.ListMissing(ctx, valid)
+	if err != nil {
+		return fmt.Errorf("list missing blobs: %w", err)
+	}
+	if len(missing) > e.cfg.maxBlobsPerSync() {
+		missing = missing[:e.cfg.maxBlobsPerSync()]
+	}
+	for _, h := range missing {
+		if err := e.DownloadBlob(ctx, peer, h); err != nil {
+			// Пир может не иметь блоба — неполный синк допустим, не срываем цикл.
+			e.log.Warn("blob sync: пропуск недостающего blob", "sha256", h, "err", err)
+		}
 	}
 	return nil
 }
@@ -81,45 +83,4 @@ func (e *Engine) storeBlob(ctx context.Context, sha256hex string, data []byte) e
 		return fmt.Errorf("store blob %s: %w", sha256hex, err)
 	}
 	return nil
-}
-
-// PullMissingBlobs запрашивает у пира blob'ы, которых нет локально.
-// Кандидаты — хэши, известные этой ноде; пир отдаёт каждый через DownloadBlob.
-func (e *Engine) PullMissingBlobs(ctx context.Context, peer Peer, candidates []string) error {
-	missing, err := e.blobs.ListMissing(ctx, candidates)
-	if err != nil {
-		return fmt.Errorf("list missing blobs: %w", err)
-	}
-	for _, h := range missing {
-		if err := e.DownloadBlob(ctx, peer, h); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// chunkReader отдаёт фиксированный буфер чанками — io.Reader, чанками по chunkSize.
-type chunkReader struct {
-	data   []byte
-	chunk  int
-	offset int
-}
-
-func newChunkReader(data []byte, chunk int) *chunkReader {
-	return &chunkReader{data: data, chunk: chunk}
-}
-
-// Read возвращает не больше c.chunk байт за вызов — каждый вызов = один чанк
-// с offset = позиция в данных.
-func (c *chunkReader) Read(p []byte) (int, error) {
-	if c.offset >= len(c.data) {
-		return 0, io.EOF
-	}
-	n := min(c.chunk, len(p))
-	n = copy(p[:n], c.data[c.offset:min(c.offset+n, len(c.data))])
-	c.offset += n
-	if c.offset >= len(c.data) {
-		return n, io.EOF
-	}
-	return n, nil
 }
