@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Download } from 'lucide-react';
+import { Check, Download, Link2 } from 'lucide-react';
 import { getModels, updateModel, type ModelFile, type ModelSetup } from '../journal/node';
-import { formatBytes } from '../shared/lib/utils';
 import { Button } from '../shared/ui/button';
 
 const key = ['recognition-models'];
@@ -22,8 +21,11 @@ const names: Record<string, [string, string]> = {
   dinov2: ['DINOv2', 'Признаки для сегментации'],
   'part-heads': ['Маски частей тела', 'Контуры лошади и её черт'],
 };
-function mb(bytes: number) {
-  return new Intl.NumberFormat('ru', { maximumFractionDigits: 1 }).format(bytes / 1000000) + ' МБ';
+const decimal = new Intl.NumberFormat('ru', { maximumFractionDigits: 1 });
+function formatSize(bytes: number) {
+  if (bytes < 1000) return decimal.format(bytes) + ' Б';
+  if (bytes < 1_000_000) return decimal.format(bytes / 1000) + ' КБ';
+  return decimal.format(bytes / 1_000_000) + ' МБ';
 }
 function ModelRow({ file }: { file: ModelFile }) {
   const cache = useQueryClient();
@@ -38,6 +40,7 @@ function ModelRow({ file }: { file: ModelFile }) {
   });
   const [name, purpose] = names[file.id] ?? [file.filename, ''];
   const active = file.state === 'downloading';
+  const percent = file.total > 0 ? Math.min(100, 100 * file.received / file.total) : undefined;
   return (
     <li className="model-row">
       <div className="model-summary">
@@ -45,7 +48,7 @@ function ModelRow({ file }: { file: ModelFile }) {
           <strong>{name}</strong>
           <small>
             {purpose}
-            {file.size ? ' · ' + formatBytes(file.size) : ''}
+            {file.size ? ' · ' + formatSize(file.size) : ''}
           </small>
         </div>
         {file.state === 'ready' ? (
@@ -58,21 +61,26 @@ function ModelRow({ file }: { file: ModelFile }) {
         ) : active ? (
           <Button
             variant="outline"
+            className="model-action"
             disabled={action.isPending}
             onClick={() => action.mutate('cancel')}
             aria-label={'Отменить загрузку ' + name}
           >
             Отменить
           </Button>
+        ) : !file.has_source ? (
+          !editing && (
+            <Button variant="outline" className="model-action" onClick={() => setEditing(true)}
+              aria-label={'Указать ссылку на ' + name}>
+              <Link2 size={15} /> Указать ссылку
+            </Button>
+          )
         ) : (
           <Button
-            variant="outline"
+            className="model-action model-download"
             disabled={action.isPending}
             aria-label={'Скачать ' + name}
-            onClick={() => {
-              if (file.has_source || source) action.mutate('download');
-              else setEditing(true);
-            }}
+            onClick={() => action.mutate('download')}
           >
             <Download size={15} />
             {file.state === 'error' ? 'Повторить' : 'Скачать'}
@@ -87,7 +95,7 @@ function ModelRow({ file }: { file: ModelFile }) {
             action.mutate('download');
           }}
         >
-          <label>
+          <label className="field">
             Ссылка на {file.filename}
             <input
               autoFocus
@@ -100,7 +108,7 @@ function ModelRow({ file }: { file: ModelFile }) {
           </label>
           <small>Прямая HTTPS-ссылка на файл этой версии.</small>
           <div>
-            <Button disabled={action.isPending}>Скачать файл</Button>{' '}
+            <Button className="model-action model-download" disabled={action.isPending}>Скачать файл</Button>{' '}
             <Button type="button" variant="ghost" onClick={() => setEditing(false)}>
               Закрыть
             </Button>
@@ -109,25 +117,23 @@ function ModelRow({ file }: { file: ModelFile }) {
       )}
       {active && (
         <div className="model-progress">
-          <progress
+          <div
+            className="model-meter"
+            role="progressbar"
             aria-label={'Загрузка ' + name}
-            max={file.total || 1}
-            value={file.total ? file.received : undefined}
-          />
+            aria-valuenow={percent === undefined ? undefined : Math.round(percent)}
+          >
+            <span style={percent === undefined ? undefined : { width: percent + '%' }} />
+          </div>
           <small>
-            {mb(file.received)}
-            {file.total > 0 && ' из ' + mb(file.total)}
+            {formatSize(file.received)}
+            {file.total > 0 && ' из ' + formatSize(file.total)}
           </small>
         </div>
       )}
       {(file.message || action.error) && (
         <p role="alert">
           {action.error?.message || file.message}
-          {!file.has_source && !editing && (
-            <button className="text-link" onClick={() => setEditing(true)}>
-              Изменить ссылку
-            </button>
-          )}
         </p>
       )}
     </li>

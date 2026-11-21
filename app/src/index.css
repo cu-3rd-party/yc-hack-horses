@@ -1386,11 +1386,43 @@ option:checked > .option-check {
 .model-panel > p, .model-row small { color: var(--muted); }
 .model-panel > p { margin-block: 6px 18px; }
 .model-panel ul { padding: 0; margin-block: 14px 0; list-style: none; display: grid; gap: 8px; }
-.model-row { padding: 12px 16px; background: var(--soft); border: 1px solid var(--line); border-radius: 12px; }
+.model-row { padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .model-summary { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.model-summary small, .model-source label { display: block; }
+.model-summary small { display: block; }
+.model-action { min-height: 36px; border-radius: 10px; flex-shrink: 0; }
+.model-download { background: var(--action); color: var(--on-action); }
+@media (hover: hover) {
+  .model-download:hover { background: color-mix(in srgb, var(--action) 84%, var(--surface)); }
+}
+.model-download:active { background: color-mix(in srgb, var(--action) 72%, var(--surface)); }
 .model-ready { display: inline-flex; align-items: center; gap: 6px; }
 .model-source, .model-progress { margin-block-start: 12px; display: grid; gap: 6px; }
-.model-source input, .model-progress progress { display: block; width: 100%; }
+.model-source .field { margin: 0; }
+.model-source input { width: 100%; }
+.model-progress small { font-variant-numeric: tabular-nums; }
+.model-meter {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.model-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--action);
+  border-radius: inherit;
+  transition: width 180ms ease-out;
+}
+.model-meter:not([aria-valuenow]) > span {
+  width: 32%;
+  animation: model-loading 1.2s ease-in-out infinite alternate;
+}
+@keyframes model-loading {
+  from { transform: translateX(0); }
+  to { transform: translateX(212.5%); }
+}
+@media (forced-colors: active) {
+  .model-meter { background: Canvas; outline: 1px solid CanvasText; }
+  .model-meter > span { background: Highlight; forced-color-adjust: none; }
+}
 .model-row [role=alert] { margin-block: 8px 0; color: var(--error); }
-.model-row [role=alert] button { margin-inline-start: 8px; }
