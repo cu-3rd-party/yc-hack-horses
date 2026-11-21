@@ -38,7 +38,7 @@ func openFresh(t *testing.T, dsn string, truncate bool) *sqlstore.Store {
 	}
 	if truncate {
 		if _, err := s.DB().ExecContext(context.Background(),
-			`TRUNCATE events, horses, observations, trait_snapshots, blobs`); err != nil {
+			`TRUNCATE events, horses, observation_photos, observations, comparisons, trait_snapshots, blobs`); err != nil {
 			t.Fatalf("truncate: %v", err)
 		}
 	}

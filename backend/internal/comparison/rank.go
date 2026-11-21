@@ -1,0 +1,74 @@
+package comparison
+
+import (
+	"math"
+	"sort"
+)
+
+type Reference struct {
+	HorseID, Name, PhotoID string
+	Descriptor
+}
+
+// unit returns a normalized vector, or nil for a missing/degenerate embedding.
+// Scaling before taking the norm avoids overflow for finite model outputs.
+func unit(v []float64) []float64 {
+	scale := 0.0
+	for _, x := range v {
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			return nil
+		}
+		scale = math.Max(scale, math.Abs(x))
+	}
+	if scale == 0 {
+		return nil
+	}
+	u := make([]float64, len(v))
+	sum := 0.0
+	for i, x := range v {
+		u[i] = x / scale
+		sum += u[i] * u[i]
+	}
+	norm := math.Sqrt(sum)
+	for i := range u {
+		u[i] /= norm
+	}
+	return u
+}
+
+func Rank(query Descriptor, references []Reference, k int) []Candidate {
+	q := unit(query.Vector)
+	if k < 1 || len(q) == 0 {
+		return []Candidate{}
+	}
+	best := make(map[string]Candidate)
+	for _, ref := range references {
+		if query.Version != ref.Version || len(q) != len(ref.Vector) {
+			continue
+		}
+		v := unit(ref.Vector)
+		if v == nil {
+			continue
+		}
+		var score float64
+		for i := range q {
+			score += q[i] * v[i]
+		}
+		score = max(-1.0, min(score, 1.0))
+		old, ok := best[ref.HorseID]
+		if !ok || score > old.Similarity || (score == old.Similarity && ref.PhotoID < old.BestPhotoID) {
+			best[ref.HorseID] = Candidate{HorseID: ref.HorseID, Name: ref.Name, BestPhotoID: ref.PhotoID, Similarity: score}
+		}
+	}
+	out := make([]Candidate, 0, len(best))
+	for _, c := range best {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Similarity == out[j].Similarity {
+			return out[i].HorseID < out[j].HorseID
+		}
+		return out[i].Similarity > out[j].Similarity
+	})
+	return out[:min(len(out), k)]
+}

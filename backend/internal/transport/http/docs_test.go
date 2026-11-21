@@ -107,7 +107,7 @@ func TestScalarEnabled(t *testing.T) {
 	if !strings.HasPrefix(raw.OpenAPI, "3.") {
 		t.Fatalf("openapi.yaml: версия %q, ожидалась 3.x", raw.OpenAPI)
 	}
-	for _, schema := range []string{"Horse", "Observation", "TraitSnapshot", "Blob", "NodeInfo", "Error"} {
+	for _, schema := range []string{"Horse", "Observation", "TraitSnapshot", "Blob", "NodeInfo", "Error", "ComparisonResult", "ComparisonDecision", "CancelResult", "ObservationPhoto"} {
 		if _, ok := raw.Components.Schemas[schema]; !ok {
 			t.Fatalf("openapi.yaml: нет схемы %s", schema)
 		}
@@ -130,9 +130,12 @@ func TestScalarEnabled(t *testing.T) {
 	}
 	// Методы на ключевых путях.
 	for path, methods := range map[string][]string{
-		"/api/v1/horses":               {"get", "post"},
-		"/api/v1/horses/{id}":          {"get", "patch"},
-		"/api/v1/observations":         {"get", "post"},
+		"/api/v1/horses":                  {"get", "post"},
+		"/api/v1/horses/{id}":             {"get", "patch"},
+		"/api/v1/observations":            {"get", "post"},
+		"/api/v1/comparisons":             {"post"},
+		"/api/v1/comparisons/{id}/cancel": {"post"},
+		"/api/v1/comparisons/{id}/detections/{detection}/decision": {"put"},
 		"/api/v1/blobs":                {"get", "post"},
 		"/api/v1/blobs/{sha256}":       {"get"},
 		"/api/v1/inference/traits":     {"post"},

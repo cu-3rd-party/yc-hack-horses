@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
@@ -36,37 +38,29 @@ func appendWithProjection(
 	payload json.RawMessage,
 	projection func(tx *sqlstore.Store) error,
 ) error {
-	now := time.Now().UTC()
 	var published domain.Event
 	err := d.Store.RunInTx(ctx, func(tx *sqlstore.Store) error {
-		last, err := tx.LastSequence(ctx, d.NodeID)
+		var err error
+		published, err = appendLocalEvent(ctx, tx, d.NodeID, eventType, aggregateID, payload)
 		if err != nil {
 			return err
 		}
-		ev := domain.Event{
-			EventID:       uuid.Must(uuid.NewV7()).String(),
-			NodeID:        d.NodeID,
-			Sequence:      last + 1,
-			EventType:     eventType,
-			SchemaVersion: 1,
-			AggregateID:   aggregateID,
-			OccurredAt:    now,
-			Payload:       payload,
-		}
-		if err := tx.Append(ctx, []domain.Event{ev}); err != nil {
-			return err
-		}
-		if err := projection(tx); err != nil {
-			return err
-		}
-		published = ev
-		return nil
+		return projection(tx)
 	})
-	if err != nil {
-		return err
+	if err == nil {
+		publishEvent(d, published)
 	}
-	publishEvent(d, published)
-	return nil
+	return err
+}
+
+// appendLocalEvent runs in the caller's transaction. Publish only after commit.
+func appendLocalEvent(ctx context.Context, tx *sqlstore.Store, nodeID, kind, id string, payload json.RawMessage) (domain.Event, error) {
+	last, err := tx.LastSequence(ctx, nodeID)
+	if err != nil {
+		return domain.Event{}, err
+	}
+	ev := domain.Event{EventID: uuid.Must(uuid.NewV7()).String(), NodeID: nodeID, Sequence: last + 1, EventType: kind, SchemaVersion: 1, AggregateID: id, OccurredAt: time.Now().UTC(), Payload: payload}
+	return ev, tx.Append(ctx, []domain.Event{ev})
 }
 
 // --- horses ---
@@ -227,7 +221,18 @@ func createObservation(d Deps) http.HandlerFunc {
 
 func listObservations(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		observations, err := d.Store.ListObservations(r.Context(), r.URL.Query().Get("horse_id"))
+		horseID := r.URL.Query().Get("horse_id")
+		include := strings.Split(r.URL.Query().Get("include"), ",")
+		if slices.Contains(include, "photos") || slices.Contains(include, "annotations") {
+			history, err := d.Store.ObservationHistory(r.Context(), horseID, slices.Contains(include, "annotations"))
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, history)
+			return
+		}
+		observations, err := d.Store.ListObservations(r.Context(), horseID)
 		if err != nil {
 			serverError(w, err)
 			return
@@ -271,32 +276,16 @@ func uploadBlob(d Deps) http.HandlerFunc {
 			return
 		}
 		// метаданные + событие blob.registered только при первой регистрации
+		blob := domain.Blob{ID: uuid.Must(uuid.NewV7()).String(), SHA256: sum, MimeType: mime, Size: int64(len(data))}
 		var created bool
 		if err := d.Store.RunInTx(r.Context(), func(tx *sqlstore.Store) error {
 			var err error
-			created, err = tx.UpsertBlob(r.Context(), domain.Blob{
-				ID:       uuid.Must(uuid.NewV7()).String(),
-				SHA256:   sum,
-				MimeType: mime,
-				Size:     int64(len(data)),
-			})
+			created, err = tx.UpsertBlob(r.Context(), blob)
 			if err != nil || !created {
 				return err
 			}
-			last, err := tx.LastSequence(r.Context(), d.NodeID)
-			if err != nil {
-				return err
-			}
-			return tx.Append(r.Context(), []domain.Event{{
-				EventID:       uuid.Must(uuid.NewV7()).String(),
-				NodeID:        d.NodeID,
-				Sequence:      last + 1,
-				EventType:     domain.EventBlobRegistered,
-				SchemaVersion: 1,
-				AggregateID:   sum,
-				OccurredAt:    time.Now().UTC(),
-				Payload:       mustJSON(map[string]any{"sha256": sum, "mime_type": mime, "size": len(data)}),
-			}})
+			_, err = appendLocalEvent(r.Context(), tx, d.NodeID, domain.EventBlobRegistered, sum, mustJSON(blob))
+			return err
 		}); err != nil {
 			serverError(w, err)
 			return
