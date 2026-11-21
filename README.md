@@ -91,6 +91,28 @@ release-APK подписан debug-ключом — Play-ready подписи н
 в Actions репо) и прикладывает артефакты. Релиз остаётся черновиком — публикуй
 после проверки вручную; автоматическая публикация — поставь `"draft":false`.
 
+### Процедура релиза (проверено на тестовом прогоне v0.0.0-test)
+
+1. Убедись, что master зелёный (ci.yml), и тегируй: `git tag vX.Y.Z origin/master
+   && git push origin vX.Y.Z`.
+2. Следи за прогоном: `GET /api/v1/repos/cu3rd/yc-hack-horses/actions/tasks`
+   (джобы `release: backend tar.gz`, `desktop`, `mobile APK`, `release-publish`).
+   Backend — обязательный; desktop/mobile падения не блокируют релиз, но тогда
+   артефактов .deb/.AppImage/.apk не будет — чини и перетегируй.
+3. Проверь драфт: `GET /repos/…/releases` → запись с `"draft": true`, в assets —
+   `backend-linux-amd64.tar.gz` минимум (при удачных сборках ещё `.deb`,
+   `.AppImage`, `.apk`).
+4. Публикация — вручную в UI (или `PATCH .../releases/{id}` с `"draft": false`).
+5. Откат незадокументированного теста: `DELETE /repos/…/releases/{id}` затем
+   `DELETE /repos/…/tags/<tag>` (порядок: сначала релиз, иначе тег занят).
+   Перетегировать после фикса воркфлоу: `git tag -f <tag> && git push -f origin <tag>`.
+
+Грабли, отловленные на тестовом прогоне: `actions/upload-artifact@v4`/`download-artifact@v4`
+не работают на Forgejo (GHES-only) — только v3; cargo 1.83 в образе tauri-base не
+умеет `edition2024` у свежих транзитивных crates — джоба делает `rustup update stable`;
+`sdkmanager` после установки cmdline-tools нужно добавлять в `PATH`; gradle в
+контейнере с лимитом памяти — `--no-daemon -Dorg.gradle.jvmargs=-Xmx2048m`.
+
 ## Генерация dev CA
 
 ```sh
@@ -100,6 +122,33 @@ make dev-certs   # bash infra/scripts/gen-dev-certs.sh — development-only
 Скрипт создаёт dev CA и узловые сертификаты в `infra/certs/`; они игнорируются git
 (`*.crt`, `*.key`). Используются docker compose (secret-файлы) и локальными нодами
 для mTLS. Для продакшена сертификаты выдаёт платформа, dev CA нельзя доверять там.
+
+## mTLS-сертификаты центральной ноды в self-service
+
+Серверный серт+ключ центральной ноды (`central.crt`/`central.key`) и dev CA
+(`ca.crt`) задеплоены как sealed secret `yc-hack-horses-prod-web-files`
+(namespace `cu3rd-yc-hack-horses-prod`, ключи `node.crt`/`node.key`/`ca.crt`),
+монтируются read-only в `/run/secrets/` (values `sealedFiles` чарта `charts/app`,
+см. self-service). Env ноды: `CERT_FILE=/run/secrets/node.crt`,
+`KEY_FILE=/run/secrets/node.key`, `CA_FILE=/run/secrets/ca.crt`
+(Actions-переменные репо), gRPC слушает `0.0.0.0:9443` (`GRPC_LISTEN_ADDR`) —
+внутри пода, наружу Service/Ingress не открывается.
+
+- **Как проверяется central identity** — ADR-0007 (mTLS trust model) и ADR-0008
+  (central node identification): central определяется только по hostname
+  `yc-hack-horses.cu3rd.ru` + успешной TLS-проверке серверного серта; клиентские
+  серты на gRPC-сервере проверяются против CA (`tls.RequireAndVerifyClientCert`,
+  `ClientCAs` из `CA_FILE`) с дополнительной привязкой к node_id по URI SAN.
+- **Проверка после доставки**: под Running, `/health` → 200, в логах нет warning
+  про `ca.crt`; gRPC поднят с `mtls=true` (строка `grpc listening` в логах).
+- **Замена dev-CA на production**: перегенерировать сертификаты платформенным CA
+  (enrollment — ADR-0007), пересоздать секрет `kubeseal`'ом
+  (`kubeseal -f plain.yaml --controller-name sealed-secrets-controller
+  --controller-namespace kube-system -o yaml`), заменить блок `sealedFiles.keys`
+  в `projects/yc-hack-horses.yaml` (имена ключей `node.crt`/`node.key`/`ca.crt`
+  и пути не меняются — под перезапустится на новой checksum. Dev-CA никуда не
+  добавлять: `security.Config.Validate` запрещает пустой `ca_file`
+  (self-signed auto-trust запрещён).
 
 ## Документация
 - ADR: `docs/adr/`

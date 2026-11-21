@@ -32,7 +32,7 @@ jobs:
           tar czf backend-linux-amd64.tar.gz \
             -C bin node \
             -C .. backend/config.example.yaml README.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: backend-linux-amd64
           path: backend-linux-amd64.tar.gz
@@ -57,7 +57,7 @@ jobs:
           cd app
           npm ci --maxsockets=4 --cache ~/.npm
           npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: app-dist
           path: app/dist
@@ -80,11 +80,19 @@ jobs:
           cd app
           npm ci --maxsockets=4 --cache ~/.npm
           npm run build
+      - name: Update Rust toolchain (cargo 1.83 в образе не умеет edition2024 у свежих crates)
+        run: |
+          rustup update stable
+          rustup default stable
+      - name: Generate placeholder icon (в git нет icons/icon.png, generate_context! требует)
+        run: |
+          mkdir -p desktop/src-tauri/icons
+          echo 'iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAA8klEQVR42u3SMQ0AAAjAMNQhAnU4BRsk9JiBpZHVo7+FCQAYAYAAEAACQAAIAAEgAASAABAAAkAACAABIAAEgAAQAAJAAAgAASAABIAAEAACQAAIAAEgAASAABAAAkAACAABIAAEgAAQAAJAAAgAASAABIAAEAACQAAIAAEgAASAABAAAkAACAABIAAEgAAQAAJAAAgAASAABIAAEAACQAAIAAEgAASAABAAAgAAEwAwAgABIAAEgAAQAAJAAAgAASAABIAAEAACQAAIAAEgAASAABAAAkAACAABIAAEgAAQAAJAAAgAASAABIAAEAACQDdaVlXIYv5hvb4AAAAASUVORK5CYII=' | base64 -d > desktop/src-tauri/icons/icon.png
       - name: Tauri build (deb, AppImage)
         run: |
           cd desktop/src-tauri
           npx tauri build --ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: desktop-bundles
           path: |
@@ -95,7 +103,7 @@ jobs:
     name: mobile (android APK)
     runs-on: homelab-docker
     container: ghcr.io/catthehacker/ubuntu:act-24.04
-    options: --cpus 2 --memory 2g
+    options: --cpus 2 --memory 4g
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,13 +123,16 @@ jobs:
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O /tmp/tools.zip
           unzip -q /tmp/tools.zip -d "$sdk/cmdline-tools"
           mv "$sdk/cmdline-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
+          export PATH="$sdk/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --sdk_root="$sdk" --licenses >/dev/null || true
           sdkmanager --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" "platform-tools" >/dev/null
           cd mobile
           npm ci --maxsockets=4 --cache ~/.npm
           npx expo prebuild -p android --no-install
-          cd android && ./gradlew assembleRelease
-      - uses: actions/upload-artifact@v4
+          cd android
+          # Gradle-демон в контейнере с 4g лимитом падает OOM — строгий heap и --no-daemon
+          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx2048m
+      - uses: actions/upload-artifact@v3
         with:
           name: mobile-apk
           path: mobile/android/app/build/outputs/apk/release/*.apk
@@ -129,12 +140,13 @@ jobs:
   release-publish:
     name: Create draft release
     needs: [release-backend, release-desktop, release-mobile]
-    if: always() && !cancelled() && needs.release-backend.result == 'success' && needs.release-desktop.result == 'success'
+    # backend обязателен; desktop/mobile не блокируют релиз (если упали — артефактов просто нет)
+    if: always() && !cancelled() && needs.release-backend.result == 'success'
     runs-on: homelab-docker
     container: ghcr.io/catthehacker/ubuntu:act-24.04
     options: --cpus 2 --memory 2g
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           path: artifacts
       - name: Create draft release and upload assets
