@@ -266,7 +266,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
         }
       />
       <div className="review-toolbar">
-        <Toggle label="Показать трейты" on={traits} onChange={() => setTraits((v) => !v)} />
+        <Toggle label="Показать черты" on={traits} onChange={() => setTraits((v) => !v)} />
         <div className="actions">
           <Button className="danger-link" variant="ghost" onClick={() => setModal('cancel')}>
             Отменить сравнение

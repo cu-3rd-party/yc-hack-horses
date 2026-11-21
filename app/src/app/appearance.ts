@@ -1,7 +1,6 @@
 export const schemes = [
   { id: 'light', label: 'Светлая' },
   { id: 'dark', label: 'Тёмная' },
-  { id: 'blue', label: 'Синяя' },
 ] as const;
 
 export type Scheme = (typeof schemes)[number]['id'];

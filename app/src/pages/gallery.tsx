@@ -129,7 +129,7 @@ export function Carousel({
         </button>
       </div>
       <div className="carousel-info">
-        <Toggle label="Показать трейты" on={traits} onChange={() => setTraits((v) => !v)} />
+        <Toggle label="Показать черты" on={traits} onChange={() => setTraits((v) => !v)} />
         <span className="tags">
           <small>{photo.angle}</small>
           <small>{photo.framing}</small>

@@ -48,7 +48,15 @@ async function match(name, creating = false) {
   await button(creating ? 'Нет подходящих' : 'Зафиксировать результат').click();
   if (creating) {
     assert.equal(await dialog().getByRole('button', { name: 'Подтвердить' }).isDisabled(), true);
-    await dialog().getByLabel('Имя лошади').fill('Искра');
+    const horseName = dialog().getByLabel('Имя лошади');
+    await horseName.fill('Искра');
+    assert.deepEqual(
+      await horseName.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return [style.borderTopWidth, style.outlineStyle, style.boxShadow];
+      }),
+      ['1px', 'none', 'none'],
+    );
   }
   if (name) await dialog().getByLabel('Название наблюдения').fill(name);
   await dialog().getByRole('button', { name: 'Подтвердить' }).click();
@@ -93,9 +101,16 @@ try {
   await page.keyboard.press('Escape');
   await nav('Распознавание');
   await nav('Настройки');
-  await page.getByRole('radio', { name: 'Синяя' }).check();
-  assert.equal(await page.locator('html').getAttribute('data-scheme'), 'blue');
-  await page.getByRole('radio', { name: 'Тёмная' }).check();
+  assert.equal(await page.getByRole('radio').count(), 2);
+  await page.evaluate(() => localStorage.setItem('takhi.color-scheme', 'blue'));
+  await page.reload();
+  await nav('Настройки');
+  const lightScheme = page.getByRole('radio', { name: 'Светлая' });
+  assert.equal(await page.locator('html').getAttribute('data-scheme'), 'light');
+  assert.equal(await lightScheme.isChecked(), true);
+  await lightScheme.focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('radio', { name: 'Тёмная' }).isChecked(), true);
   await page.reload();
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   assert.equal(await page.locator('html').getAttribute('data-scheme'), 'dark');
@@ -120,7 +135,7 @@ try {
   assert.equal(await leftPhoto.getAttribute('src'), originalSrc);
   await page.getByRole('heading', { name: 'Новое наблюдение 2' }).waitFor();
   await button('Лошадь — назад').click();
-  const toggle = page.getByRole('switch', { name: 'Показать трейты' });
+  const toggle = page.getByRole('switch', { name: 'Показать черты' });
   await toggle.click();
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');
   await toggle.click();
@@ -176,7 +191,7 @@ try {
   const bounds = await dialog().boundingBox();
   assert.equal(bounds.width, viewport.width);
   assert.equal(bounds.height, viewport.height);
-  await dialog().getByRole('switch', { name: 'Показать трейты' }).click();
+  await dialog().getByRole('switch', { name: 'Показать черты' }).click();
   await snap('viewer');
   await page.keyboard.press('ArrowRight');
   await dialog().getByRole('heading', { name: 'Алтай — у склона.jpg' }).waitFor();

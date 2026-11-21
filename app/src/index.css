@@ -32,7 +32,7 @@
   --error-hover: #fbcfcb;
   --action: #1c1c1e;
   --on-action: #fff;
-  --focus: #526ed3;
+  --focus: #6381df;
   --selection: #00bc7d;
   --score: #39865f;
   --error: #b42932;
@@ -52,31 +52,9 @@
   --error-hover: #583030;
   --action: #f4f4f5;
   --on-action: #1c1c1e;
-  --focus: #a1b2ff;
   --selection: #47dba6;
   --score: #63bc91;
   --error: #ff949a;
-}
-:root[data-scheme='blue'] {
-  --surface: #f4f7ff;
-  --ink: #142650;
-  --muted: #495b81;
-  --action: #3155bc;
-  --focus: #3155bc;
-  --soft: #dce6ff;
-  --line: #c9d7ef;
-  --field-border: #b7c9e5;
-}
-:root[data-scheme='blue'] .sidebar {
-  --surface: #213c77;
-  --ink: #ffffff;
-  --muted: #d6e1fa;
-  --line: #35528f;
-  --soft: #355797;
-  --action: #ffffff;
-  --on-action: #213c77;
-  --focus: #afc8ff;
-  background: var(--surface);
 }
 body {
   margin: 0;
@@ -99,10 +77,14 @@ button:disabled {
 button svg {
   flex: none;
 }
-:where(button, input, select, textarea):focus-visible,
-.search:focus-within {
-  outline: 2px solid var(--focus);
-  outline-offset: 3px;
+:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: -1px;
+}
+@media (forced-colors: active) {
+  :root {
+    --focus: Highlight;
+  }
 }
 small {
   font-size: 12px;
@@ -782,7 +764,7 @@ small {
 .dialog .field input {
   min-height: 40px;
 }
-.dialog .field input[aria-invalid='true'] {
+.dialog .field input[aria-invalid='true']:not(:focus-visible) {
   border-color: var(--error);
 }
 .veil[data-state='open'] {
@@ -857,6 +839,12 @@ small {
 }
 .field textarea {
   min-height: 80px;
+}
+.field :is(input, textarea, select):focus-visible,
+.filter-menu select:focus-visible,
+.search:has(input:focus-visible) {
+  border-color: var(--focus);
+  outline: none;
 }
 .field-error {
   font-size: 13px;
@@ -1191,11 +1179,10 @@ small {
 }
 .schemes label:has(:checked) {
   border-color: var(--action);
-  box-shadow: inset 0 0 0 1px var(--action);
+  background: var(--soft);
 }
-.schemes label:focus-within {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+.schemes label:has(input:focus-visible) {
+  border-color: var(--focus);
 }
 .schemes input {
   position: absolute;
@@ -1211,9 +1198,6 @@ small {
 }
 .scheme-swatch.dark {
   background: #232325;
-}
-.scheme-swatch.blue {
-  background: #415fc3;
 }
 .check input {
   accent-color: var(--action);
