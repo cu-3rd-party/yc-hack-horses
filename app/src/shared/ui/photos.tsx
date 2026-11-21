@@ -50,6 +50,7 @@ export function MarkedPhoto({
     dy = (height - h) / 2;
   const line = annotation.outline.flatMap(([x, y]) => [x * w + dx, y * h + dy]);
   const labels = annotation.traits.map(({ label, value }) => {
+    if (/^[-−]?\d/.test(value)) return label + ' ' + value;
     const phrase = value.trim() + ' ' + label.toLocaleLowerCase('ru');
     return phrase.charAt(0).toLocaleUpperCase('ru') + phrase.slice(1);
   });

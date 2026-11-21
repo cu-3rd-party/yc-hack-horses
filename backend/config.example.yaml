@@ -37,7 +37,7 @@ api:
   docs_enabled: false
 
 inference:
-  comparison_url: ""       # HTTP-адаптер сегментации; подробнее docs/comparison-api.md
+  comparison_url: ""       # при engine: yolo пустое значение включает локальное сравнение; URL выбирает внешний сервис
   engine: "unavailable"     # unavailable | reference | yolo (ADR-0012)
   # engine: yolo — детекция лошади YOLO ONNX + кропы; веса НЕ в git:
   # bash infra/scripts/download-yolo-model.sh

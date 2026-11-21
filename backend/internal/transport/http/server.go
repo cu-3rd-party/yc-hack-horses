@@ -20,7 +20,7 @@ import (
 
 // Deps — зависимости транспортного слоя.
 type Deps struct {
-	ComparisonModel comparison.ModelEndpoint
+	ComparisonModel comparison.Analyzer
 	Store           *sqlstore.Store
 	Blobs           storage.BlobStore
 	Hub             *Hub

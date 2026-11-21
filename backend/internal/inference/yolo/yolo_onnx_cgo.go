@@ -181,12 +181,12 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 	if err = e.ensureSession(); err != nil {
 		return nil, err
 	}
-	var boxes []image.Rectangle
+	var rows []InstanceEmbedding
 	if region != nil {
 		if region.Empty() || !region.In(img.Bounds()) {
 			return nil, fmt.Errorf("%w: box outside image", inference.ErrInvalidImage)
 		}
-		boxes = append(boxes, *region)
+		rows = append(rows, InstanceEmbedding{Box: *region})
 	} else {
 		out, params, err := e.runInference(img)
 		if err != nil {
@@ -197,13 +197,13 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 			if box.Empty() {
 				continue
 			}
-			boxes = append(boxes, box)
+			rows = append(rows, InstanceEmbedding{Box: box, Confidence: det.Confidence})
 			if first {
 				break
 			}
 		}
 	}
-	if len(boxes) == 0 {
+	if len(rows) == 0 {
 		return nil, inference.ErrNoAnimalDetected
 	}
 	if e.cfg.ReIDModelDir != "" {
@@ -212,27 +212,25 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 			return nil, fmt.Errorf("%w: %v", inference.ErrModelUnavailable, e.encoderErr)
 		}
 	}
-	rows := make([]InstanceEmbedding, 0, len(boxes))
-	for _, box := range boxes {
+	for i := range rows {
+		row := &rows[i]
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		row := InstanceEmbedding{Box: box}
 		if e.encoder != nil {
-			row.Embedding, err = e.encoder.Embed(ctx, img, box)
+			row.Embedding, err = e.encoder.Embed(ctx, img, row.Box)
 			if err != nil {
 				return nil, err
 			}
 			if !first {
-				e.measureInstance(ctx, img, &row)
+				e.measureInstance(ctx, img, row)
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			row.Embedding = inference.EmbeddingResult{ModelVersion: ModelVersion, Vector: poolEmbedding(makeCrops(img, box).Body)}
+			row.Embedding = inference.EmbeddingResult{ModelVersion: ModelVersion, Vector: poolEmbedding(makeCrops(img, row.Box).Body)}
 		}
-		rows = append(rows, row)
 	}
 	return rows, nil
 }

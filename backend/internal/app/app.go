@@ -150,6 +150,7 @@ func New(cfg *config.Config) (*App, error) {
 	// yolo — детекция YOLO ONNX + кропы (ADR-0012, V1). Движок yolo лениво
 	// грузит модель: без весов/библиотеки деградирует в ErrModelUnavailable.
 	var cvEngine inference.InferenceEngine = inference.NewUnavailable()
+	var comparisonModel comparison.Analyzer
 	switch cfg.Inference.Engine {
 	case "reference":
 		cvEngine = inference.NewReference(blobs)
@@ -158,10 +159,15 @@ func New(cfg *config.Config) (*App, error) {
 			ModelPath:      cfg.Inference.ModelPath,
 			RuntimeLibPath: cfg.Inference.RuntimeLib,
 			ReIDModelDir:   cfg.Inference.ReIDModelDir,
+			IncludeMasks:   true,
 			Blobs:          blobs,
 		})
 		cvEngine = detector
+		comparisonModel = comparison.LocalModel{Detector: detector}
 		a.addStop(func() { _ = detector.Close() })
+	}
+	if cfg.Inference.ComparisonURL != "" {
+		comparisonModel = comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL}
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:           store,
@@ -173,7 +179,7 @@ func New(cfg *config.Config) (*App, error) {
 		SyncStats:       a.syncStatsSnapshot,
 		BlobStats:       a.blobStatsSnapshot,
 		Engine:          cvEngine,
-		ComparisonModel: comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL},
+		ComparisonModel: comparisonModel,
 		DocsEnabled:     cfg.Api.DocsEnabled,
 	})
 	srvHandler := http.Handler(handler)

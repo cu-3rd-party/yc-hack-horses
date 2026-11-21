@@ -15,6 +15,10 @@ import (
 var ErrUnavailable = errors.New("comparison model with horse segmentation is unavailable")
 var ErrModel = errors.New("invalid comparison model response")
 
+type Analyzer interface {
+	Analyze(context.Context, []byte, string) ([]Prediction, error)
+}
+
 // ModelEndpoint receives the original image bytes. Geometry is in pixels in
 // the oriented image frame (width x height), independently of model tensor size.
 type ModelEndpoint struct{ URL string }

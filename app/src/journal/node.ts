@@ -27,6 +27,7 @@ class NodeError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -53,13 +54,24 @@ async function request<T>(
   }
   if (!response.ok) {
     const error = await response.json().catch(() => null);
-    throw new NodeError(response.status, error?.message || 'Ошибка запроса к локальной ноде.');
+    throw new NodeError(
+      response.status,
+      error?.message || 'Ошибка запроса к локальной ноде.',
+      error?.code,
+    );
   }
   if (!response.headers.get('content-type')?.includes('application/json'))
     throw new NodeError(0, unavailable);
   return response.json() as Promise<T>;
 }
 
+const measurementLabels: Record<string, string> = {
+  coat_light: 'Яркость шерсти',
+  coat_warmth: 'Теплота окраса',
+  cheek_light: 'Яркость щеки',
+  muzzle_contrast: 'Контраст морды',
+  head_ratio: 'Пропорции головы',
+};
 const traitLabels: Record<string, string> = {
   muzzle: 'Морда',
   mane: 'Грива',
@@ -83,13 +95,17 @@ const traitValues: Record<string, string> = {
   erect: 'стоячие',
   none: 'нет',
 };
+const measurementFormat = new Intl.NumberFormat('ru', { maximumFractionDigits: 3 });
 function annotation(data?: HorseAnnotation | null): Annotation {
   if (!data) return noMarks;
   return {
     outline: data.horse_polygon,
     traits: data.traits.map(({ key, value, polygon }) => ({
-      label: traitLabels[key] ?? key,
-      value: traitValues[value] ?? value,
+      label: measurementLabels[key] ?? traitLabels[key] ?? key,
+      value:
+        measurementLabels[key] && value.trim() && Number.isFinite(Number(value))
+          ? measurementFormat.format(Number(value))
+          : traitValues[value] ?? value,
       polygon: polygon ?? undefined,
       at: polygon?.[0],
     })),
@@ -189,6 +205,12 @@ export async function analyze(file: ImportPhoto): Promise<Review> {
   try {
     result = await request<ComparisonResult>('/comparisons', 'POST', body);
   } catch (error) {
+    if (
+      error instanceof NodeError &&
+      (error.code === 'local_inference_unavailable' ||
+        error.code === 'local_segmentation_unavailable')
+    )
+      throw error;
     if (error instanceof NodeError && [404, 405, 501, 503].includes(error.status))
       throw new Error('Сравнение недоступно на этой ноде.');
     throw error;

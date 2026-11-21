@@ -69,6 +69,84 @@ func reviewRequest(t *testing.T, method, url string, body any, status int, out a
 	}
 }
 
+func uploadComparisonPhoto(t *testing.T, a *e2eNode, data []byte) domain.Blob {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	file, err := mw.CreateFormFile("file", "photo.jpg")
+	require.NoError(t, err)
+	_, err = file.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+	res, err := http.Post(a.httpBase+"/api/v1/blobs", mw.FormDataContentType(), &body)
+	require.NoError(t, err)
+	return decodeBlob(t, res)
+}
+
+// With just the detector this exercises native detection and missing masks.
+// With all three ReID files it also checks segmentation and persisted rankings.
+func TestLocalComparisonUpload(t *testing.T) {
+	model, runtime := os.Getenv("YOLO_MODEL_PATH"), os.Getenv("YOLO_RUNTIME_LIB")
+	parts := os.Getenv("INFER_REID_MODEL_DIR")
+	node := startNode(t, uuid.NewString(), t.TempDir(), newTestCA(t), nil, "", func(c *config.Config) {
+		c.Inference.Engine = "yolo"
+		c.Inference.ModelPath = model
+		c.Inference.RuntimeLib = runtime
+		c.Inference.ReIDModelDir = parts
+		c.Inference.ComparisonURL = ""
+	})
+	endpoint := node.httpBase + "/api/v1/comparisons"
+	var blank bytes.Buffer
+	require.NoError(t, jpeg.Encode(&blank, image.NewRGBA(image.Rect(0, 0, 160, 120)), nil))
+	sha := uploadComparisonPhoto(t, node, blank.Bytes()).SHA256
+	if model == "" || runtime == "" {
+		var failure struct{ Code string }
+		reviewRequest(t, "POST", endpoint, map[string]string{"blob_sha256": sha}, 503, &failure)
+		require.Equal(t, "local_inference_unavailable", failure.Code)
+		return
+	}
+	var empty comparison.Result
+	reviewRequest(t, "POST", endpoint, map[string]string{"blob_sha256": sha}, 201, &empty)
+	require.Equal(t, []comparison.Detection{}, empty.Detections)
+
+	photo, err := os.ReadFile("../../../app/public/photos/pair.jpg")
+	require.NoError(t, err)
+	query := map[string]string{"blob_sha256": uploadComparisonPhoto(t, node, photo).SHA256}
+	if parts == "" {
+		var failure struct{ Code string }
+		reviewRequest(t, "POST", endpoint, query, 503, &failure)
+		require.Equal(t, "local_segmentation_unavailable", failure.Code)
+		return
+	}
+	var first comparison.Result
+	reviewRequest(t, "POST", endpoint, query, 201, &first)
+	require.Len(t, first.Detections, 2)
+	ids := make([]string, 2)
+	for i, d := range first.Detections {
+		require.Positive(t, d.Confidence)
+		require.GreaterOrEqual(t, len(d.Annotation.HorsePolygon), 3)
+		require.Empty(t, d.Candidates)
+		var saved comparison.Saved
+		path := endpoint + "/" + first.ID + "/detections/" + d.ID + "/decision"
+		reviewRequest(t, "PUT", path, comparison.Decision{Action: "create_horse", HorseName: "Horse " + d.ID, Name: "Herd"}, 200, &saved)
+		ids[i] = saved.HorseID
+		var history []comparison.History
+		reviewRequest(t, "GET", node.httpBase+"/api/v1/observations?include=photos,annotations&horse_id="+saved.HorseID, nil, 200, &history)
+		require.Len(t, history, 1)
+		require.Len(t, history[0].Photos, 1)
+		require.Equal(t, &d.Annotation, history[0].Photos[0].Annotation)
+	}
+	var repeat comparison.Result
+	reviewRequest(t, "POST", endpoint, query, 201, &repeat)
+	require.Len(t, repeat.Detections, 2)
+	for i, d := range repeat.Detections {
+		require.Len(t, d.Candidates, 2)
+		require.Equal(t, ids[i], d.Candidates[0].HorseID)
+		require.Equal(t, first.Detections[i].ID, d.Candidates[0].BestPhotoID)
+		require.InDelta(t, 1.0, d.Candidates[0].Similarity, 1e-6)
+	}
+}
+
 func exerciseComparison(t *testing.T, postgresDSN string) {
 	var imageBytes bytes.Buffer
 	require.NoError(t, jpeg.Encode(&imageBytes, image.NewRGBA(image.Rect(0, 0, 100, 50)), nil))
@@ -111,20 +189,7 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 		}
 	})
 	b := startNode(t, idB, t.TempDir(), ca, []config.PeerConfig{{Addr: a.grpcAddr, NodeID: idA, Host: "node-" + short(idA)}}, grpcB, enableModel)
-	upload := func(data []byte) domain.Blob {
-		t.Helper()
-		var body bytes.Buffer
-		mw := multipart.NewWriter(&body)
-		file, err := mw.CreateFormFile("file", "photo.jpg")
-		require.NoError(t, err)
-		_, err = file.Write(data)
-		require.NoError(t, err)
-		require.NoError(t, mw.Close())
-		res, err := http.Post(a.httpBase+"/api/v1/blobs", mw.FormDataContentType(), &body)
-		require.NoError(t, err)
-		return decodeBlob(t, res)
-	}
-	blob := upload(imageBytes.Bytes())
+	blob := uploadComparisonPhoto(t, a, imageBytes.Bytes())
 	compare := func(n *e2eNode, k, status int) comparison.Result {
 		t.Helper()
 		var v comparison.Result
@@ -241,7 +306,7 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	// original must replicate with a distinct ID and no invented geometry.
 	var second bytes.Buffer
 	require.NoError(t, jpeg.Encode(&second, image.NewRGBA(image.Rect(0, 0, 50, 50)), nil))
-	legacy := upload(second.Bytes())
+	legacy := uploadComparisonPhoto(t, a, second.Bytes())
 	var blobs []domain.Blob
 	reviewRequest(t, "GET", a.httpBase+"/api/v1/blobs", nil, 200, &blobs)
 	for _, b := range blobs {

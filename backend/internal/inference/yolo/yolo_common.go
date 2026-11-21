@@ -20,6 +20,7 @@ type Config struct {
 }
 
 type InstanceEmbedding struct {
+	Confidence       float64 // YOLO score for automatic detections.
 	Box              image.Rectangle
 	Embedding        inference.EmbeddingResult
 	MaskPNG          []byte
