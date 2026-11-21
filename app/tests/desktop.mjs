@@ -37,7 +37,11 @@ const dialog = () => page.getByRole('dialog');
 async function snap(name) {
   if (screenshots) {
     await mkdir(screenshots, { recursive: true });
-    await page.screenshot({ path: path.join(screenshots, name + '.png') });
+    await page.waitForFunction(() =>
+      Array.from(document.images).every((img) => img.complete && img.naturalWidth > 0),
+    );
+    await page.mouse.move(0, 0);
+    await page.screenshot({ path: path.join(screenshots, name + '.png'), animations: 'disabled' });
   }
 }
 async function match(name, creating = false) {
@@ -49,7 +53,24 @@ async function match(name, creating = false) {
 try {
   await launch();
   await snap('home');
+  await page.locator('.recent').first().click();
+  await dialog().waitFor();
+  await dialog().getByRole('button', { name: 'Открыть фото на весь экран' }).click();
+  await page.locator('.dialog.fullscreen').waitFor();
+  await page.keyboard.press('Escape');
+  await dialog().getByRole('button', { name: 'Открыть фото на весь экран' }).waitFor();
+  await page.keyboard.press('Escape');
+  await nav('Распознавание');
   await nav('Настройки');
+  await page.getByRole('radio', { name: 'Синяя' }).check();
+  assert.equal(await page.locator('html').getAttribute('data-scheme'), 'blue');
+  await page.getByRole('radio', { name: 'Тёмная' }).check();
+  await page.reload();
+  await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
+  assert.equal(await page.locator('html').getAttribute('data-scheme'), 'dark');
+  await snap('home-dark');
+  await nav('Настройки');
+  await page.getByRole('radio', { name: 'Светлая' }).check();
   await page.getByRole('switch', { name: 'Сбой один раз' }).click();
   await page.waitForFunction(
     () => document.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true',
@@ -57,27 +78,38 @@ try {
   await nav('Распознавание');
   await page.getByRole('button', { name: /Табун у сопки/ }).click();
   await page.getByRole('button', { name: /Анализируем снимок/ }).waitFor();
+  assert.equal(await page.locator('.dropzone').isDisabled(), true);
+  assert.ok(await page.locator('.file-state').innerText());
   await page.getByRole('heading', { name: 'Сравнение наблюдений' }).waitFor();
-  await button('Особь — вперёд').click();
+  await page.getByText('Лошадь 1/2', { exact: true }).waitFor();
+  const leftPhoto = page.locator('.compare-card').first().locator('.marked img');
+  const originalSrc = await leftPhoto.getAttribute('src');
+  await button('Лошадь — вперёд').click();
+  await page.getByText('Лошадь 2/2', { exact: true }).waitFor();
+  assert.equal(await leftPhoto.getAttribute('src'), originalSrc);
   await page.getByRole('heading', { name: 'Новое наблюдение 2' }).waitFor();
-  await button('Особь — назад').click();
-  const toggle = page.getByRole('switch', { name: 'Показывать признаки' });
+  await button('Лошадь — назад').click();
+  const toggle = page.getByRole('switch', { name: 'Показать трейты' });
   await toggle.click();
   assert.equal(await toggle.getAttribute('aria-checked'), 'false');
   await toggle.click();
   await page.getByRole('button', { name: /Алтай.*83%/ }).click();
-  await button('Фото кандидата — вперёд').click();
+  await button('Фото — вперёд').click();
+  await page.getByText('Фото 2/2', { exact: true }).waitFor();
   await button('Выбрать фотографию кандидата').click();
   await dialog().getByLabel('Поиск по названию').fill('несуществующая');
   await dialog().getByText('Фотографий по этим условиям нет.').waitFor();
   await dialog().getByLabel('Поиск по названию').fill('выпасе');
+  await dialog().getByRole('button', { name: 'Фильтры' }).click();
   await dialog().getByLabel('Ракурс').selectOption('Профиль');
   await dialog().getByLabel('План', { exact: true }).selectOption('Общий план');
+  await page.keyboard.press('Escape');
   await dialog()
     .getByRole('button', { name: /Алтай — на выпасе/ })
     .click();
   await snap('review');
   await button('Зафиксировать результат').click();
+  assert.equal((await dialog().boundingBox()).width, 440);
   await dialog().getByLabel('Название наблюдения').fill('a/b');
   assert.equal(await dialog().getByRole('button', { name: 'Подтвердить' }).isEnabled(), false);
   await dialog().getByRole('button', { name: 'Отменить' }).click();
@@ -104,6 +136,12 @@ try {
   await button('Назад в галерею').click();
   await page.getByRole('button', { name: /Алтай/ }).click();
   await page.getByRole('button', { name: /Алтай — на выпасе/ }).click();
+  const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+  const bounds = await dialog().boundingBox();
+  assert.equal(bounds.width, viewport.width);
+  assert.equal(bounds.height, viewport.height);
+  await dialog().getByRole('switch', { name: 'Показать трейты' }).click();
+  await snap('viewer');
   await page.keyboard.press('ArrowRight');
   await dialog().getByRole('heading', { name: 'Алтай — у склона.jpg' }).waitFor();
   await button('Следующее фото').click();
@@ -116,7 +154,9 @@ try {
   await page.getByLabel('Значение признака', { exact: true }).fill('Тёмная');
   await button('Подставить демокоординаты').click();
   await button('Сохранить запись').click();
+  await button('Фильтры').click();
   await page.getByRole('checkbox').check();
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: /Полевой след/ }).waitFor();
   await nav('Синхронизация');
   const connection = page.getByRole('switch', { name: 'Связь с демо-узлом' });
@@ -199,7 +239,7 @@ try {
   await nav('Распознавание');
   await page.getByRole('button', { name: /На выпасе/ }).click();
   await page.getByRole('heading', { name: 'Новое наблюдение 1' }).waitFor();
-  assert.equal(await button('Особь — вперёд').isDisabled(), true);
+  assert.equal(await button('Лошадь — вперёд').isDisabled(), true);
   assert.deepEqual(errors, []);
   assert.deepEqual(network, []);
   console.log(

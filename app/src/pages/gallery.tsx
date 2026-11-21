@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 import { describeTraits, horsePhotos, type Notebook, type Photo } from '../journal/types';
-import { Heading, Back, Modal } from '../shared/ui/journal-ui';
+import { Heading, Back, Modal, Toggle } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
 export function Gallery({ book }: { book: Notebook }) {
   const [selected, setSelected] = useState<string | null>(null),
@@ -91,6 +91,7 @@ export function Carousel({
   setIndex: (index: number) => void;
   close: () => void;
 }) {
+  const [traits, setTraits] = useState(false);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') {
@@ -107,9 +108,9 @@ export function Carousel({
   }, [index, photos.length, setIndex]);
   const photo = photos[index]!;
   return (
-    <Modal wide title={photo.name} onClose={close}>
+    <Modal fullscreen title={photo.name} onClose={close}>
       <div className="carousel">
-        <MarkedPhoto photo={photo} />
+        <MarkedPhoto photo={photo} traits={traits} />
         <button
           className="car-prev"
           aria-label="Предыдущее фото"
@@ -128,12 +129,13 @@ export function Carousel({
         </button>
       </div>
       <div className="carousel-info">
+        <Toggle label="Показать трейты" on={traits} onChange={() => setTraits((v) => !v)} />
         <span className="tags">
           <small>{photo.angle}</small>
           <small>{photo.framing}</small>
         </span>
         <span>
-          {index + 1} / {photos.length}
+          Фото {index + 1}/{photos.length}
         </span>
       </div>
     </Modal>

@@ -27,7 +27,7 @@ function openJournal() {
     height: 880,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#faf9f5',
+    backgroundColor: '#ffffff',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

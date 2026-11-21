@@ -5,8 +5,7 @@ import {
   FileImage,
   Images,
   LoaderCircle,
-  ScanLine,
-  Upload,
+  CircleAlert,
   UserRoundPlus,
 } from 'lucide-react';
 import { samplePhoto } from '../journal/fixtures';
@@ -24,145 +23,175 @@ import { Heading, Modal, Pager, Toggle, useNotice } from '../shared/ui/journal-u
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
 
-export function ReviewPage({ book, openLog }: { book: Notebook; openLog: () => void }) {
-  return book.review ? (
-    <Comparison key={book.review.id} book={book} review={book.review} />
+interface IntakeProps {
+  book: Notebook;
+  openLog: (id?: string) => void;
+  onBusyChange: (busy: boolean) => void;
+}
+export function ReviewPage(props: IntakeProps) {
+  const review = props.book.review;
+  return review ? (
+    <Comparison key={review.id} book={props.book} review={review} />
   ) : (
-    <Intake book={book} openLog={openLog} />
+    <Intake {...props} />
   );
 }
-function Intake({ book, openLog }: { book: Notebook; openLog: () => void }) {
+function Intake({ book, openLog, onBusyChange }: IntakeProps) {
   const picker = useRef<HTMLInputElement>(null),
     locked = useRef(false);
-  const [loading, setLoading] = useState(false),
-    [drag, setDrag] = useState(false);
-  const analyze = useCommand('/analysis'),
-    notice = useNotice();
-  async function begin(input: () => Promise<AnalysisInput>) {
+  const [loading, setLoading] = useState(false);
+  const [drag, setDrag] = useState(false);
+  const [fileName, setFileName] = useState('');
+  const [error, setError] = useState('');
+  const analyze = useCommand('/analysis');
+  async function begin(name: string, input: () => Promise<AnalysisInput>) {
     if (locked.current) return;
     locked.current = true;
+    setFileName(name);
+    setError('');
     setLoading(true);
+    onBusyChange(true);
     try {
       await analyze.mutateAsync(await input());
-    } catch (error) {
-      notice((error as Error).message, true);
+    } catch (cause) {
+      setError((cause as Error).message);
     } finally {
       locked.current = false;
       setLoading(false);
+      onBusyChange(false);
     }
   }
   function pick(files: FileList | null) {
-    if (!files?.length) return;
+    if (!files?.length || locked.current) return;
     if (files.length !== 1) {
-      notice('Выберите одну фотографию за раз.', true);
+      setFileName('');
+      setError('Выберите одну фотографию за раз.');
       return;
     }
     const selected = files[0]!;
-    void begin(async () => ({ upload: await importImage(selected) }));
+    void begin(selected.name, async () => ({ upload: await importImage(selected) }));
   }
-  const recent = [...book.observations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 2);
+  const recent = [...book.observations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
   return (
     <>
       <Heading
         title="Новое наблюдение"
-        description="Загрузите полевой снимок, чтобы сравнить лошадей с особями в каталоге."
+        description="Загрузите снимок, чтобы найти лошадь в каталоге."
       />
-      <input
-        type="file"
-        className="sr-only"
-        aria-label="Файл наблюдения"
-        tabIndex={-1}
-        ref={picker}
-        accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl"
-        disabled={loading}
-        onChange={(e) => {
-          pick(e.target.files);
-          e.target.value = '';
-        }}
-      />
-      <button
-        className={'dropzone' + (drag ? ' drag' : '')}
-        disabled={loading}
-        aria-busy={loading}
-        onClick={() => picker.current?.click()}
-        onDragOver={(e) => {
-          e.preventDefault();
-          if (!loading) setDrag(true);
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDrag(false);
-          if (!loading) pick(e.dataTransfer.files);
-        }}
-      >
-        <span className="upload-symbol">
-          {loading ? (
-            <LoaderCircle className="spin" size={26} />
-          ) : (
-            <Upload size={26} strokeWidth={1.6} />
+      <div className="intake-grid">
+        <section aria-label="Загрузка фотографии">
+          <h2 className="intake-label">Полевой снимок</h2>
+          <input
+            type="file"
+            className="sr-only"
+            aria-label="Файл наблюдения"
+            tabIndex={-1}
+            ref={picker}
+            accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl"
+            disabled={loading}
+            onChange={(e) => {
+              pick(e.target.files);
+              e.target.value = '';
+            }}
+          />
+          <button
+            className={'dropzone' + (drag ? ' drag' : '') + (error ? ' invalid' : '')}
+            disabled={loading}
+            aria-busy={loading}
+            aria-describedby="upload-feedback"
+            onClick={() => picker.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!loading) setDrag(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDrag(false);
+              pick(e.dataTransfer.files);
+            }}
+          >
+            {loading && <LoaderCircle className="spin" size={18} />}
+            <span>
+              {loading ? (
+                'Анализируем снимок…'
+              ) : (
+                <>
+                  <strong>Выберите файл</strong> или перетащите его сюда
+                </>
+              )}
+            </span>
+          </button>
+          {fileName && (
+            <div className="file-state" role="status">
+              <FileImage size={17} />
+              <span>{fileName}</span>
+              {loading && <small>Обработка</small>}
+            </div>
           )}
-        </span>
-        <strong>{loading ? 'Анализируем снимок…' : 'Перетащите фотографию сюда'}</strong>
-        <span>
-          {loading ? 'Подбираем кандидатов из каталога' : 'Один снимок в любом формате изображения'}
-        </span>
-        {!loading && (
-          <span className="pick-file">
-            <FileImage size={15} />
-            Выбрать файл
-          </span>
-        )}
-      </button>
+          {error ? (
+            <div id="upload-feedback" className="file-error" role="alert">
+              <CircleAlert size={16} />
+              <span>{error}</span>
+            </div>
+          ) : (
+            <p className="file-hint" id="upload-feedback">
+              Одна фотография за раз. JPG, PNG, HEIC, TIFF и другие форматы изображений.
+            </p>
+          )}
+        </section>
+        <section aria-label="Последние наблюдения" className="recent-section">
+          <div className="section-heading">
+            <h2>Последние наблюдения</h2>
+            <button className="text-link" disabled={loading} onClick={() => openLog()}>
+              В журнал <ArrowRight size={15} />
+            </button>
+          </div>
+          <div className="recent-list">
+            {recent.map((o) => (
+              <button
+                key={o.id}
+                className="recent"
+                disabled={loading}
+                onClick={() => openLog(o.id)}
+              >
+                {o.photos[0] ? <Thumbnail photo={o.photos[0]} /> : <FileImage size={20} />}
+                <span>{o.name}</span>
+                <small>{dateLabel(o.date)}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
       <section className="home-section">
         <div className="section-heading">
           <h2>Примеры для распознавания</h2>
         </div>
         <div className="sample-grid">
-          {(['single', 'pair'] as const).map((key, i) => (
-            <button
-              key={key}
-              className="sample-card"
-              disabled={loading}
-              onClick={() => void begin(async () => ({ sample: key }))}
-            >
-              <div className="sample-art">
-                <Thumbnail photo={samplePhoto(key)} />
-                <span className="photo-chip">
-                  <ScanLine size={13} />
-                  {i ? '2 особи' : '1 особь'}
-                </span>
-              </div>
-              <div className="sample-info">
-                <div>
-                  <strong>{i ? 'Табун у сопки' : 'На выпасе'}</strong>
-                  <small>{i ? 'Групповое наблюдение' : 'Одиночное наблюдение'}</small>
+          {(['single', 'pair'] as const).map((key, i) => {
+            const photo = samplePhoto(key);
+            return (
+              <button
+                key={key}
+                className="sample-card"
+                disabled={loading}
+                onClick={() => void begin(photo.name, async () => ({ sample: key }))}
+              >
+                <div className="sample-art">
+                  <Thumbnail photo={photo} />
                 </div>
-                <span className="round-arrow">
-                  <ArrowRight size={18} />
-                </span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="home-section">
-        <div className="section-heading">
-          <h2>Последние наблюдения</h2>
-          <button className="text-link" onClick={openLog}>
-            В журнал <ArrowRight size={15} />
-          </button>
-        </div>
-        <div className="recent-list">
-          {recent.map((o) => (
-            <button key={o.id} className="recent" onClick={openLog}>
-              {o.photos[0] ? <Thumbnail photo={o.photos[0]} /> : <FileImage />}
-              <span>{o.name}</span>
-              <small>{dateLabel(o.date)}</small>
-            </button>
-          ))}
+                <div className="sample-info">
+                  <div>
+                    <strong>{i ? 'Табун у сопки' : 'На выпасе'}</strong>
+                    <small>{i ? 'Две лошади' : 'Одна лошадь'}</small>
+                  </div>
+                  <ArrowRight size={18} strokeWidth={1.6} />
+                </div>
+              </button>
+            );
+          })}
         </div>
       </section>
     </>
@@ -224,7 +253,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
         }
       />
       <div className="review-toolbar">
-        <Toggle label="Показывать признаки" on={traits} onChange={() => setTraits((v) => !v)} />
+        <Toggle label="Показать трейты" on={traits} onChange={() => setTraits((v) => !v)} />
         <div className="actions">
           <Button variant="outline" onClick={() => setModal('new')}>
             <UserRoundPlus size={16} />
@@ -249,11 +278,13 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
             highlight={review.detections.length > 1}
           />
           <footer>
-            <span>Особь на снимке</span>
+            <span className="photo-filename" title={review.photo.name}>
+              {review.photo.name}
+            </span>
             <Pager
               index={index}
               total={review.detections.length}
-              label="Особь"
+              label="Лошадь"
               onChange={(i) => setOrdinal(review.detections[i]!.number)}
             />
           </footer>
@@ -272,7 +303,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
             <Pager
               index={photoIndex}
               total={photos.length}
-              label="Фото кандидата"
+              label="Фото"
               onChange={(i) => select(candidateId, i)}
             />
           </footer>
@@ -281,7 +312,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
       <section className="home-section">
         <div className="section-heading">
           <h2>Вероятные кандидаты</h2>
-          <small>{detection.candidates.length} особи</small>
+          <small>{detection.candidates.length}</small>
         </div>
         <div className="candidate-grid">
           {detection.candidates.map((c) => {
@@ -301,7 +332,8 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
                     <em
                       style={{
                         width: c.score + '%',
-                        background: 'hsl(' + Math.round(12 + c.score * 0.92) + ' 32% 46%)',
+                        backgroundColor:
+                          'color-mix(in oklab, var(--muted), var(--score) ' + c.score + '%)',
                       }}
                     />
                   </i>
@@ -349,13 +381,17 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
               Название наблюдения
               <input
                 autoFocus
+                aria-invalid={!validName(filename)}
+                aria-describedby={!validName(filename) ? 'decision-name-error' : undefined}
                 value={filename}
                 disabled={saving}
                 onChange={(e) => setDrafts({ ...drafts, [detection.id]: e.target.value })}
               />
             </label>
             {!validName(filename) && (
-              <p className="field-error">Введите допустимое название файла.</p>
+              <p className="field-error" id="decision-name-error">
+                Введите допустимое название файла.
+              </p>
             )}
             <div className="dialog-actions">
               <Button

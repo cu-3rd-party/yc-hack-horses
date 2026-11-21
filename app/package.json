@@ -19,7 +19,6 @@
   },
   "devDependencies": {
     "@fontsource/inter": "^5",
-    "@fontsource/pt-serif": "^5",
     "@radix-ui/react-dialog": "^1",
     "@radix-ui/react-slot": "^1",
     "@tailwindcss/vite": "^4",

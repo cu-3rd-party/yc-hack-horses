@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Stage, Layer, Line, Circle, Rect, Text } from 'react-konva';
-import { ArrowUpRight, Search } from 'lucide-react';
+import { ArrowUpRight, FileText, Search, SlidersHorizontal } from 'lucide-react';
 import type { Annotation, Photo } from '../../journal/types';
 import { usePhotoURL } from '../../journal/media';
 
@@ -68,9 +68,12 @@ export function MarkedPhoto({
                 <Line
                   points={line}
                   closed
-                  stroke="#e4ed92"
+                  stroke="#ffffff"
                   strokeWidth={2}
-                  fill="rgba(145,160,73,0.13)"
+                  shadowColor="#101010"
+                  shadowBlur={2}
+                  shadowOpacity={0.9}
+                  fill="rgba(255,255,255,0.09)"
                   lineJoin="round"
                 />
               )}
@@ -137,10 +140,59 @@ function LayerMark({
 }) {
   return (
     <>
-      <Line points={[px, py, tx + labelWidth / 2, ty + 10]} stroke="#e4ed92" strokeWidth={1} />
-      <Circle x={px} y={py} radius={3.5} fill="#e4ed92" stroke="#374429" />
-      <Rect x={tx} y={ty} width={labelWidth} height={19} cornerRadius={4} fill="#34432e" />
-      <Text x={tx + 6} y={ty + 4} text={label} fontSize={11} fill="#fffef1" />
+      <Line points={[px, py, tx + labelWidth / 2, ty + 10]} stroke="#ffffff" strokeWidth={1} />
+      <Circle x={px} y={py} radius={3.5} fill="#ffffff" stroke="#242424" />
+      <Rect x={tx} y={ty} width={labelWidth} height={19} cornerRadius={4} fill="#222222" />
+      <Text x={tx + 6} y={ty + 4} text={label} fontFamily="Inter" fontSize={11} fill="#ffffff" />
+    </>
+  );
+}
+export function PhotoTile({
+  photo,
+  name,
+  tags,
+  detail,
+  onClick,
+}: {
+  photo?: Photo;
+  name: string;
+  tags: string[];
+  detail?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className="photo-card" onClick={onClick}>
+      {photo ? (
+        <Thumbnail photo={photo} />
+      ) : (
+        <span className="no-photo">
+          <FileText size={28} />
+          Запись без фото
+        </span>
+      )}
+      <div>
+        <strong>{name}</strong>
+        {detail && <span className="tile-detail">{detail}</span>}
+        <span className="tags">
+          {tags.map((tag, i) => (
+            <small key={i}>{tag}</small>
+          ))}
+        </span>
+      </div>
+    </button>
+  );
+}
+export function FilterMenu({ count, children }: { count: number; children: ReactNode }) {
+  const id = useId();
+  return (
+    <>
+      <button className="filter-trigger" popoverTarget={id}>
+        <SlidersHorizontal size={16} />
+        Фильтры{count > 0 && <b>{count}</b>}
+      </button>
+      <div id={id} popover="auto" className="filter-menu">
+        {children}
+      </div>
     </>
   );
 }
@@ -172,32 +224,48 @@ export function PhotoGrid({
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <select aria-label="Ракурс" value={angle} onChange={(e) => setAngle(e.target.value)}>
-          <option value="">Все ракурсы</option>
-          {[...new Set(photos.map((p) => p.angle))].map((v) => (
-            <option key={v}>{v}</option>
-          ))}
-        </select>
-        <select aria-label="План" value={framing} onChange={(e) => setFraming(e.target.value)}>
-          <option value="">Все планы</option>
-          {[...new Set(photos.map((p) => p.framing))].map((v) => (
-            <option key={v}>{v}</option>
-          ))}
-        </select>
+        <FilterMenu count={Number(Boolean(angle)) + Number(Boolean(framing))}>
+          <label>
+            Ракурс
+            <select aria-label="Ракурс" value={angle} onChange={(e) => setAngle(e.target.value)}>
+              <option value="">Все ракурсы</option>
+              {[...new Set(photos.map((p) => p.angle))].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            План
+            <select aria-label="План" value={framing} onChange={(e) => setFraming(e.target.value)}>
+              <option value="">Все планы</option>
+              {[...new Set(photos.map((p) => p.framing))].map((v) => (
+                <option key={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          {(angle || framing) && (
+            <button
+              className="text-link"
+              onClick={() => {
+                setAngle('');
+                setFraming('');
+              }}
+            >
+              Сбросить фильтры
+            </button>
+          )}
+        </FilterMenu>
       </div>
       {visible.length ? (
         <div className="photo-grid">
           {visible.map((p) => (
-            <button key={p.id} className="photo-card" onClick={() => onSelect(p)}>
-              <Thumbnail photo={p} />
-              <div>
-                <strong>{p.name}</strong>
-                <span className="tags">
-                  <small>{p.angle}</small>
-                  <small>{p.framing}</small>
-                </span>
-              </div>
-            </button>
+            <PhotoTile
+              key={p.id}
+              name={p.name}
+              photo={p}
+              tags={[p.angle, p.framing]}
+              onClick={() => onSelect(p)}
+            />
           ))}
         </div>
       ) : (

@@ -6,6 +6,8 @@ import { Heading, Modal, Toggle, useNotice } from '../shared/ui/journal-ui';
 import { Button } from '../shared/ui/button';
 import { formatBytes } from '../shared/lib/utils';
 
+import { initialScheme, schemes, selectScheme } from '../app/appearance';
+
 const stamp = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('ru-RU') : 'Ещё не выполнялась';
 function Facts({ rows }: { rows: [string, string | number][] }) {
@@ -116,6 +118,7 @@ export function Sync({ book }: { book: Notebook }) {
   );
 }
 export function Settings({ book }: { book: Notebook }) {
+  const [theme, setTheme] = useState(initialScheme);
   const [reset, setReset] = useState(false),
     pref = useCommand('/preferences'),
     clear = useCommand('/reset'),
@@ -126,6 +129,27 @@ export function Settings({ book }: { book: Notebook }) {
         title="Настройки"
         description="Локальное хранилище и управление демонстрационными данными."
       />
+      <fieldset className="scheme-panel">
+        <legend>Цветовая схема</legend>
+        <div className="schemes">
+          {schemes.map(({ id, label }) => (
+            <label key={id}>
+              <input
+                type="radio"
+                name="scheme"
+                value={id}
+                checked={theme === id}
+                onChange={() => {
+                  selectScheme(id);
+                  setTheme(id);
+                }}
+              />
+              <span className={'scheme-swatch ' + id} aria-hidden="true" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <section className="panel">
         <h2>Рабочее пространство</h2>
         <Facts

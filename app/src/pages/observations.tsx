@@ -1,22 +1,44 @@
 import { useState } from 'react';
-import { FileImage, MapPin, Plus, LoaderCircle } from 'lucide-react';
+import { MapPin, Plus, LoaderCircle, Search, Expand } from 'lucide-react';
 import type { Notebook, Observation } from '../journal/types';
 import { dateLabel, describeTraits, validName } from '../journal/types';
 import { importImage } from '../journal/media';
 import { useCommand } from '../journal/use-journal';
 import { validCoordinates } from '../journal/api';
 import { Back, Heading, Modal, useNotice } from '../shared/ui/journal-ui';
-import { MarkedPhoto, Thumbnail } from '../shared/ui/photos';
+import { FilterMenu, MarkedPhoto, PhotoTile, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
 
-export function ObservationLog({ book }: { book: Notebook }) {
+import { Carousel } from './gallery';
+export function ObservationLog({
+  book,
+  initialId,
+  onDismiss,
+}: {
+  book: Notebook;
+  initialId?: string;
+  onDismiss: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [fullscreen, setFullscreen] = useState(false);
   const [manual, setManual] = useState(false),
     [unlinked, setUnlinked] = useState(false);
-  const [detail, setDetail] = useState<Observation | null>(null),
+  const [detail, setDetail] = useState<Observation | null>(
+      () => book.observations.find((o) => o.id === initialId) ?? null,
+    ),
     [image, setImage] = useState(0);
   if (manual) return <Manual book={book} close={() => setManual(false)} />;
   const list = book.observations
     .filter((o) => !unlinked || o.horseId === null)
+    .filter((o) =>
+      [
+        o.name,
+        ...o.photos.map((p) => p.name),
+        book.horses.find((h) => h.id === o.horseId)?.name,
+      ].some((name) =>
+        name?.toLocaleLowerCase('ru').includes(search.trim().toLocaleLowerCase('ru')),
+      ),
+    )
     .sort((a, b) => b.date.localeCompare(a.date));
   return (
     <>
@@ -31,48 +53,80 @@ export function ObservationLog({ book }: { book: Notebook }) {
         }
       />
       <div className="filters">
-        <label className="check">
+        <label className="search">
+          <Search size={16} />
           <input
-            type="checkbox"
-            checked={unlinked}
-            onChange={(e) => setUnlinked(e.target.checked)}
+            aria-label="Поиск наблюдений"
+            placeholder="Найти запись, фото или особь"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
-          Только без привязки
         </label>
+        <FilterMenu count={Number(unlinked)}>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={unlinked}
+              onChange={(e) => setUnlinked(e.target.checked)}
+            />
+            Только без привязки
+          </label>
+        </FilterMenu>
         <small>Записей · {list.length}</small>
       </div>
-      <div className="log-list">
-        {list.map((o) => (
-          <button
-            key={o.id}
-            className="log-row"
-            onClick={() => {
-              setDetail(o);
-              setImage(0);
-            }}
-          >
-            {o.photos[0] ? (
-              <Thumbnail photo={o.photos[0]} />
-            ) : (
-              <span className="file-tile">
-                <FileImage />
-              </span>
-            )}
-            <span className="row-title">
-              <strong>{o.name}</strong>
-              <small>{book.horses.find((h) => h.id === o.horseId)?.name ?? 'Без привязки'}</small>
-            </span>
-            <span className="row-date">{dateLabel(o.date)}</span>
-            <span className="pill">{book.pending.includes(o.id) ? 'В очереди' : 'Сохранено'}</span>
-          </button>
-        ))}
-        {!list.length && <p className="empty">Наблюдений пока нет.</p>}
+      <div className="photo-grid">
+        {list.map((o) => {
+          const photo = o.photos[0];
+          const horse = book.horses.find((h) => h.id === o.horseId)?.name ?? 'Без привязки';
+          return (
+            <PhotoTile
+              key={o.id}
+              photo={photo}
+              name={o.name}
+              detail={[photo && photo.name !== o.name ? photo.name : '', dateLabel(o.date)]
+                .filter(Boolean)
+                .join(' · ')}
+              tags={[
+                horse,
+                ...(photo ? [photo.angle, photo.framing] : []),
+                ...(book.pending.includes(o.id) ? ['В очереди'] : []),
+              ]}
+              onClick={() => {
+                setDetail(o);
+                setImage(0);
+              }}
+            />
+          );
+        })}
+        {!list.length && <p className="empty">Наблюдений по этим условиям нет.</p>}
       </div>
-      {detail && (
-        <Modal wide title={detail.name} onClose={() => setDetail(null)}>
+      {detail && fullscreen && (
+        <Carousel
+          photos={detail.photos}
+          index={image}
+          setIndex={setImage}
+          close={() => setFullscreen(false)}
+        />
+      )}
+      {detail && !fullscreen && (
+        <Modal
+          wide
+          title={detail.name}
+          onClose={() => {
+            setDetail(null);
+            onDismiss();
+          }}
+        >
           {detail.photos[image] && (
             <div className="record-photo">
               <MarkedPhoto photo={detail.photos[image]} />
+              <button
+                className="expand-photo"
+                aria-label="Открыть фото на весь экран"
+                onClick={() => setFullscreen(true)}
+              >
+                <Expand size={18} />
+              </button>
             </div>
           )}
           {detail.photos.length > 1 && (

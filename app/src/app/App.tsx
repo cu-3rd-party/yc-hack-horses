@@ -3,11 +3,8 @@ import {
   Activity,
   Binoculars,
   BookOpen,
-  ChevronRight,
   CircleHelp,
-  FolderOpen,
   Images,
-  Leaf,
   LoaderCircle,
   RefreshCw,
   ScanLine,
@@ -40,70 +37,59 @@ const sections = [
 type Route = (typeof sections)[number]['items'][number]['key'];
 export default function App() {
   const [route, setRoute] = useState<Route>('review'),
-    [help, setHelp] = useState(false);
+    [help, setHelp] = useState(false),
+    [processing, setProcessing] = useState(false),
+    [logId, setLogId] = useState<string | undefined>();
   const main = useRef<HTMLElement>(null),
     { data: book, error, refetch } = useNotebook();
   useEffect(() => {
     main.current?.scrollTo(0, 0);
   }, [route, book?.review?.id]);
-  const current = sections.flatMap((s) => [...s.items]).find((s) => s.key === route);
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-icon">
-            <Binoculars size={27} strokeWidth={1.55} />
-          </span>
-          <div>
+      <header className="masthead">
+        <div className="mast-inner">
+          <button
+            className="brand"
+            aria-label="Тахи — распознавание"
+            onClick={() => setRoute('review')}
+          >
+            <span className="brand-icon">
+              <Binoculars size={21} strokeWidth={1.7} />
+            </span>
             <strong>Тахи</strong>
-            <small>Полевой журнал</small>
-          </div>
-        </div>
-        <nav aria-label="Навигация">
-          {sections.map((section) => (
-            <div className="nav-group" key={section.label}>
-              <h2>{section.label}</h2>
-              {section.items.map(({ key, label, icon: Icon }) => (
-                <button
-                  key={key}
-                  aria-current={key === route ? 'page' : undefined}
-                  className={key === route ? 'active' : ''}
-                  onClick={() => setRoute(key)}
-                >
-                  <Icon size={18} strokeWidth={1.65} />
-                  {label}
-                  {key === 'sync' && !!book?.pending.length && <b>{book.pending.length}</b>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <div className="side-bottom">
-          <span className="local-mark">
-            <Leaf size={17} />
-          </span>
-          <div>
-            <strong>Локальная станция</strong>
-            <small>
-              <i />
-              Деморежим
-            </small>
-          </div>
-        </div>
-      </aside>
-      <div className="work">
-        <div className="topbar">
-          <div>
-            <FolderOpen size={15} />
-            <span>Рабочая область</span>
-            <ChevronRight size={13} />
-            <b>{current?.label}</b>
-          </div>
-          <button className="help" onClick={() => setHelp(true)}>
-            <CircleHelp size={16} />
-            Справка
+          </button>
+          <nav aria-label="Навигация">
+            {sections.map((section, index) => (
+              <div className={'nav-group' + (index ? ' tools' : '')} key={section.label}>
+                {section.items.map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    title={label}
+                    aria-label={label}
+                    disabled={processing}
+                    aria-current={key === route ? 'page' : undefined}
+                    onClick={() => setRoute(key)}
+                  >
+                    {index > 0 && <Icon size={18} strokeWidth={1.7} />}
+                    <span>{label}</span>
+                    {key === 'sync' && !!book?.pending.length && <b>{book.pending.length}</b>}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <button
+            className="help"
+            title="Справка"
+            aria-label="Справка"
+            onClick={() => setHelp(true)}
+          >
+            <CircleHelp size={18} strokeWidth={1.7} />
           </button>
         </div>
+      </header>
+      <div className="work">
         <main ref={main}>
           <div className="content">
             {error ? (
@@ -119,9 +105,24 @@ export default function App() {
               </p>
             ) : (
               <>
-                {route === 'review' && <ReviewPage book={book} openLog={() => setRoute('log')} />}
+                {route === 'review' && (
+                  <ReviewPage
+                    onBusyChange={setProcessing}
+                    book={book}
+                    openLog={(id) => {
+                      setLogId(id);
+                      setRoute('log');
+                    }}
+                  />
+                )}
                 {route === 'gallery' && <Gallery book={book} />}
-                {route === 'log' && <ObservationLog book={book} />}
+                {route === 'log' && (
+                  <ObservationLog
+                    book={book}
+                    initialId={logId}
+                    onDismiss={() => setLogId(undefined)}
+                  />
+                )}
                 {route === 'dashboard' && <Dashboard book={book} />}
                 {route === 'sync' && <Sync book={book} />}
                 {route === 'settings' && <Settings book={book} />}

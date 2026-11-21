@@ -44,6 +44,7 @@ export function Modal({
   onClose,
   busy = false,
   wide = false,
+  fullscreen = false,
 }: {
   title: string;
   description?: string;
@@ -51,7 +52,11 @@ export function Modal({
   onClose: () => void;
   busy?: boolean;
   wide?: boolean;
+  fullscreen?: boolean;
 }) {
+  const opener = useRef(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
   return (
     <Dialog.Root
       open
@@ -62,7 +67,25 @@ export function Modal({
       <Dialog.Portal>
         <Dialog.Overlay className="veil" />
         <Dialog.Content
-          className={'dialog' + (wide ? ' wide' : '')}
+          onCloseAutoFocus={(event) => {
+            if (opener.current?.isConnected) {
+              event.preventDefault();
+              opener.current.focus({ preventScroll: true });
+            }
+          }}
+          onEscapeKeyDown={(event) => {
+            const popover = document.querySelector<HTMLElement>('[role="dialog"] :popover-open');
+            if (popover) {
+              event.preventDefault();
+              popover.hidePopover();
+              document
+                .querySelector<HTMLButtonElement>(
+                  '[popovertarget="' + CSS.escape(popover.id) + '"]',
+                )
+                ?.focus();
+            }
+          }}
+          className={'dialog' + (fullscreen ? ' fullscreen' : wide ? ' wide' : '')}
           {...(!description ? { 'aria-describedby': undefined } : {})}
         >
           <div className="dialog-head">
@@ -107,7 +130,7 @@ export function Pager({
         <ChevronLeft size={16} />
       </button>
       <span>
-        {index + 1} / {total}
+        {label} {index + 1}/{total}
       </span>
       <button
         aria-label={label + ' — вперёд'}
