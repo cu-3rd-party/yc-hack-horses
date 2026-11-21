@@ -51,6 +51,9 @@ type App struct {
 
 	grpcSrv *grpc.Server
 	grpcLn  net.Listener
+	// muxGRPCSrv — gRPC-сервер для h2c-мультиплекс-порта (grpc_multiplex):
+	// TLS терминирует ingress, аутентификация — по серту из заголовка.
+	muxGRPCSrv *grpc.Server
 
 	announcer *discovery.Announcer
 	// bg хранит функции остановки фоновых контуров (sync, discovery, gRPC).
@@ -134,9 +137,26 @@ func New(cfg *config.Config) (*App, error) {
 		Engine:      cvEngine,
 		DocsEnabled: cfg.Api.DocsEnabled,
 	})
+	srvHandler := http.Handler(handler)
+	if cfg.Network.GRPCMultiplex {
+		muxSrv, err := newMuxGRPCServer(cfg, identity, a.pstore, a.blobs, slog.Default())
+		if err != nil {
+			store.Close() //nolint:errcheck // ошибка сборки важнее
+			return nil, err
+		}
+		a.muxGRPCSrv = muxSrv
+		wrapped, err := newMuxHandler(muxSrv, handler)
+		if err != nil {
+			store.Close() //nolint:errcheck // ошибка сборки важнее
+			return nil, err
+		}
+		srvHandler = wrapped
+		a.addStop(func() { muxSrv.GracefulStop() })
+		slog.Info("grpc multiplex enabled", "addr", cfg.Network.ListenAddr)
+	}
 	a.srv = &http.Server{
 		Addr:              cfg.Network.ListenAddr,
-		Handler:           handler,
+		Handler:           srvHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return a, nil
