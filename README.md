@@ -54,6 +54,22 @@ make compose-down             # остановить
 YOLO-инференс требует CGO-сборку (desktop/mobile бинарь); контейнер центральной
 ноды собирается CGO-free — инференс деградирует в `ErrModelUnavailable` (ADR-0012).
 
+## Документация API (Scalar, только central)
+
+На центральной ноде можно включить интерактивную документацию REST API
+(Scalar UI на `/api/scalar`, спека OpenAPI 3 — `/api/scalar/openapi.yaml`):
+
+```sh
+API_DOCS_ENABLED=true          # env, либо api.docs_enabled: true в node.yaml
+```
+
+По умолчанию флаг выключен (`api.docs_enabled: false` в `backend/config.example.yaml`);
+локальные ноды его не включают — документация публикуется только на central.
+После включения: `https://yc-hack-horses.cu3rd.ru/api/scalar` (UI забирает спеку
+с локального эндпоинта, наружу ходит только браузерная оболочка с CDN).
+Валидность спеки и 404 без флага проверяются тестом `docs_test.go` в
+`backend/internal/transport/http`.
+
 ## Деплой в self-service
 
 Central нода живёт в self-service как проект `yc-hack-horses` (env `prod`, зона `grm`,

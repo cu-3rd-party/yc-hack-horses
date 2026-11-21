@@ -124,14 +124,15 @@ func New(cfg *config.Config) (*App, error) {
 		})
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
-		Store:      store,
-		Blobs:      blobs,
-		Hub:        a.hub,
-		NodeID:     nodeID,
-		RoleHint:   cfg.Node.RoleHint,
-		AppVersion: cfg.AppVersion,
-		SyncStats:  a.syncStatsSnapshot,
-		Engine:     cvEngine,
+		Store:       store,
+		Blobs:       blobs,
+		Hub:         a.hub,
+		NodeID:      nodeID,
+		RoleHint:    cfg.Node.RoleHint,
+		AppVersion:  cfg.AppVersion,
+		SyncStats:   a.syncStatsSnapshot,
+		Engine:      cvEngine,
+		DocsEnabled: cfg.Api.DocsEnabled,
 	})
 	a.srv = &http.Server{
 		Addr:              cfg.Network.ListenAddr,
