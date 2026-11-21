@@ -1,0 +1,179 @@
+//go:build cgo
+
+package reid
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"fmt"
+	"image"
+	"image/draw"
+	"io"
+	"math"
+	"os"
+	"path/filepath"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	ort "github.com/yalue/onnxruntime_go"
+)
+
+type Segmenter struct {
+	parts   *ort.DynamicAdvancedSession
+	weights []float32
+}
+type Encoder struct {
+	visual *ort.DynamicAdvancedSession
+}
+
+func verifiedFile(dir, name, sha string) (string, error) {
+	path := filepath.Join(dir, name)
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err = io.Copy(hash, f); err != nil {
+		return "", err
+	}
+	if fmt.Sprintf("%x", hash.Sum(nil)) != sha {
+		return "", fmt.Errorf("reid: unexpected weights for %s", name)
+	}
+	return path, nil
+}
+func session(path, input, output string) (*ort.DynamicAdvancedSession, error) {
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, err
+	}
+	defer opts.Destroy()
+	if err = opts.SetIntraOpNumThreads(4); err != nil {
+		return nil, err
+	}
+	if err = opts.SetInterOpNumThreads(1); err != nil {
+		return nil, err
+	}
+	return ort.NewDynamicAdvancedSession(path, []string{input}, []string{output}, opts)
+}
+
+// OpenSegmenter opens only the anatomical model for masks of previously ranked crops.
+func OpenSegmenter(dir string) (*Segmenter, error) {
+	parts, err := verifiedFile(dir, "dinov2-small.onnx", "83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea")
+	if err != nil {
+		return nil, err
+	}
+	heads, err := verifiedFile(dir, "part-heads.f32", "a1f535819545891bd7ee01391575a9c02cdcc599da8dbf19425a980957254408")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(heads)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) != 4*headWidth*4 {
+		return nil, fmt.Errorf("reid: invalid part head dimensions")
+	}
+	e := &Segmenter{weights: make([]float32, 4*headWidth)}
+	for i := range e.weights {
+		e.weights[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
+	}
+	e.parts, err = session(parts, "pixel_values", "last_hidden_state")
+	return e, err
+}
+func (e *Segmenter) Close() error { return e.parts.Destroy() }
+
+// Open requires an initialized ONNX Runtime.
+func Open(dir string) (*Encoder, error) {
+	path, err := verifiedFile(dir, "megadescriptor-l-384.onnx", "de9d5ed23423c7f6a09e0cc033c9dc645a8b672264ad22d8d776fba470eba50f")
+	if err != nil {
+		return nil, err
+	}
+	visual, err := session(path, "pixels", "embedding")
+	if err != nil {
+		return nil, err
+	}
+	return &Encoder{visual: visual}, nil
+}
+func (e *Encoder) Close() error { return e.visual.Destroy() }
+
+func run(ctx context.Context, sess *ort.DynamicAdvancedSession, img *image.RGBA, box image.Rectangle, size int, output ort.Shape, cubic bool) ([]float32, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	in, err := ort.NewTensor(ort.NewShape(1, 3, int64(size), int64(size)), tensorPixels(img, box, size, cubic))
+	if err != nil {
+		return nil, err
+	}
+	defer in.Destroy()
+	out, err := ort.NewEmptyTensor[float32](output)
+	if err != nil {
+		return nil, err
+	}
+	defer out.Destroy()
+	if err = sess.Run([]ort.Value{in}, []ort.Value{out}); err != nil {
+		return nil, err
+	}
+	return append([]float32(nil), out.GetData()...), ctx.Err()
+}
+
+// Keep the original coordinates of the detection and the padded segmentation crops.
+func cropForParts(src image.Image, box image.Rectangle) (*image.RGBA, error) {
+	if box.Empty() || !box.In(src.Bounds()) {
+		return nil, fmt.Errorf("%w: invalid horse box %v", inference.ErrInvalidImage, box)
+	}
+	roi := pad(pad(box, src.Bounds(), .12), src.Bounds(), .25)
+	img := image.NewRGBA(roi)
+	draw.Draw(img, roi, src, roi.Min, draw.Src)
+	return img, nil
+}
+func (e *Segmenter) pixels(ctx context.Context, img *image.RGBA, box image.Rectangle) ([]pixel, error) {
+	return segmentedPixels(ctx, img, box, func(ctx context.Context, r image.Rectangle) (partMaps, error) {
+		v, err := run(ctx, e.parts, img, r, 224, ort.NewShape(1, 257, tokenDim), true)
+		if err != nil {
+			return partMaps{}, err
+		}
+		return decodeParts(v, e.weights, r), nil
+	})
+}
+func (e *Segmenter) Mask(ctx context.Context, src image.Image, box image.Rectangle) ([]byte, error) {
+	img, err := cropForParts(src, box)
+	if err != nil {
+		return nil, err
+	}
+	samples, err := e.pixels(ctx, img, box)
+	if err != nil {
+		return nil, err
+	}
+	return maskPNG(samples, box)
+}
+
+// Measure computes operator-visible measurements; its outputs do not enter the descriptor.
+func (e *Segmenter) Measure(ctx context.Context, src image.Image, box image.Rectangle, withMasks bool) (TraitEvidence, []byte, error) {
+	img, err := cropForParts(src, box)
+	if err != nil {
+		return TraitEvidence{}, nil, err
+	}
+	samples, err := e.pixels(ctx, img, box)
+	if err != nil {
+		return TraitEvidence{}, nil, err
+	}
+	result, err := evidence(samples, box, withMasks)
+	if err != nil || !withMasks {
+		return result, nil, err
+	}
+	mask, err := maskPNG(samples, box)
+	return result, mask, err
+}
+
+func (e *Encoder) Embed(ctx context.Context, src image.Image, box image.Rectangle) (inference.EmbeddingResult, error) {
+	img, err := cropForParts(src, box)
+	if err != nil {
+		return inference.EmbeddingResult{}, err
+	}
+	visual, err := run(ctx, e.visual, img, box, 384, ort.NewShape(1, Dimension), false)
+	if err != nil {
+		return inference.EmbeddingResult{}, err
+	}
+	return visualEmbedding(visual)
+}

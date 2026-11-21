@@ -120,11 +120,14 @@ func New(cfg *config.Config) (*App, error) {
 	case "reference":
 		cvEngine = inference.NewReference(blobs)
 	case "yolo":
-		cvEngine = yolo.New(yolo.Config{
+		detector := yolo.New(yolo.Config{
 			ModelPath:      cfg.Inference.ModelPath,
 			RuntimeLibPath: cfg.Inference.RuntimeLib,
+			ReIDModelDir:   cfg.Inference.ReIDModelDir,
 			Blobs:          blobs,
 		})
+		cvEngine = detector
+		a.addStop(func() { _ = detector.Close() })
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:       store,

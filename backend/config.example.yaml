@@ -42,3 +42,4 @@ inference:
   # bash infra/scripts/download-yolo-model.sh
   # model_path: "infra/models/yolov8n.onnx"
   # runtime_lib: "infra/models/libonnxruntime.so.1.31.1"
+  # reid_model_dir: "infra/models/reid-v1"  # поиск по MegaDescriptor-L-384, измерения по маскам для просмотра

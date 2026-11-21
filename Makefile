@@ -50,3 +50,21 @@ dev-certs: ## dev CA и сертификаты (development-only)
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "};{printf "%-16s %s\n", $$1, $$2}'
+
+.PHONY: prepare-horse30 bench-horse30 bench-horse30-full horse30-masks-full
+prepare-horse30: ## скачать и подготовить Horse-30 к разметке
+	python3 infra/horse30/prepare.py
+
+bin/horse-embed: $(wildcard backend/internal/inference/cmd/horse-embed/*.go backend/internal/inference/*.go backend/internal/inference/reid/*.go backend/internal/inference/yolo/*.go) backend/go.mod backend/go.sum
+	mkdir -p bin
+	cd backend && $(GO) build -o ../bin/horse-embed ./internal/inference/cmd/horse-embed
+
+bench-horse30: prepare-horse30 bin/horse-embed ## ранжировать по MegaDescriptor и открыть проверку фотографий
+	python3 infra/horse30/bench.py $(BENCH_ARGS)
+
+bench-horse30-full: bin/horse-embed ## обработать все 8114 кадров Horse-30 и открыть результаты
+	python3 infra/horse30/prepare.py --full
+	python3 infra/horse30/bench.py --full $(BENCH_ARGS)
+
+horse30-masks-full: bin/horse-embed ## добавить сегментацию к готовому полному отчёту
+	python3 infra/horse30/bench.py --full --masks-only $(BENCH_ARGS)
