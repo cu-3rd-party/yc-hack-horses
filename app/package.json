@@ -1,6 +1,6 @@
 {
   "name": "yc-hack-horses",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "Полевой журнал наблюдений за лошадьми Пржевальского",
   "author": "cu3rd <cu3rd@cu3rd.ru>",
@@ -62,6 +62,9 @@
     ],
     "mac": {
       "category": "public.app-category.education",
+      "extendInfo": {
+        "CFBundleDisplayName": "ЛошID"
+      },
       "identity": "-",
       "icon": "resources/icon.png"
     },

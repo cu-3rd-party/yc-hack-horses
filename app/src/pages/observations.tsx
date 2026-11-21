@@ -8,6 +8,7 @@ import { validCoordinates } from '../journal/api';
 import { Back, Heading, Modal, useNotice } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoTile, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
+import { Select } from '../shared/ui/select';
 
 import { Carousel } from './gallery';
 export function ObservationLog({
@@ -222,14 +223,15 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
           </label>
           <label className="field">
             Особь
-            <select value={horse} onChange={(e) => setHorse(e.target.value)}>
-              <option value="">Без привязки</option>
-              {book.horses.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name}
-                </option>
-              ))}
-            </select>
+            <Select
+              label="Особь"
+              value={horse}
+              onChange={setHorse}
+              options={[
+                { value: '', label: 'Без привязки' },
+                ...book.horses.map((h) => ({ value: h.id, label: h.name })),
+              ]}
+            />
           </label>
           <label className="field">
             Фотографии

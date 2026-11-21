@@ -64,6 +64,8 @@ async function match(name, creating = false) {
 }
 try {
   await launch();
+  assert.equal(await page.title(), 'ЛошID · Полевой журнал');
+  await button('ЛошID — распознавание').waitFor();
   await snap('home');
   await page.evaluate(() => {
     window.dialogAnimations = [];
@@ -154,6 +156,8 @@ try {
   await angle.click();
   await angle.getByRole('option', { name: 'Профиль' }).click();
   await framing.click();
+  assert.equal(await framing.locator('option:checked svg:visible').count(), 1);
+  assert.equal(await framing.locator('option:not(:checked) svg:visible').count(), 0);
   await framing.getByRole('option', { name: 'Общий план' }).click();
   await quality.click();
   await quality.getByRole('option', { name: 'Среднее' }).click();
@@ -212,6 +216,18 @@ try {
   await page.keyboard.press('Escape');
   await nav('Наблюдения');
   await button('Ручная запись').click();
+  const horseSelect = page.getByRole('combobox', { name: 'Особь' });
+  const arrowInset = await horseSelect.evaluate((el) =>
+    el.getBoundingClientRect().right -
+    el.querySelector('.select-chevron').getBoundingClientRect().right -
+    parseFloat(getComputedStyle(el).borderRightWidth),
+  );
+  assert.equal(arrowInset, 12);
+  await horseSelect.click();
+  await horseSelect.getByRole('option', { name: 'Сарана' }).click();
+  assert.equal(await horseSelect.inputValue(), 'saran');
+  await horseSelect.click();
+  await horseSelect.getByRole('option', { name: 'Без привязки' }).click();
   await page.getByLabel('Название наблюдения').fill('Полевой след');
   await page.getByLabel('Значение признака', { exact: true }).fill('Тёмная');
   await button('Подставить демокоординаты').click();

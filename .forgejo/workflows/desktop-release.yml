@@ -49,4 +49,4 @@ jobs:
           sha: ${{ github.sha }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
           release-dir: app/release/downloads
-          release-notes: "Тахи для macOS (Apple Silicon) и Linux (x86-64). Для macOS скачайте ZIP, для Linux — AppImage или deb. SHA256SUMS содержит контрольные суммы."
+          release-notes: "ЛошID для macOS (Apple Silicon) и Linux (x86-64). Для macOS скачайте ZIP, для Linux — AppImage или deb. SHA256SUMS содержит контрольные суммы."

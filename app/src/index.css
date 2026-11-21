@@ -487,7 +487,6 @@ small {
 .review-toolbar {
   gap: 12px;
   padding: 12px 0;
-  border-block: 1px solid var(--line);
   margin-bottom: 20px;
 }
 .actions,
@@ -929,20 +928,38 @@ small {
   background: var(--soft);
   color: var(--ink);
 }
-.photo-filter,
-.photo-filter::picker(select) {
+.journal-select,
+.journal-select::picker(select) {
   appearance: base-select;
 }
-.photo-filter > button {
+.field .journal-select {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 12px;
+}
+.journal-select > button {
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-.photo-filter::picker-icon {
-  font-size: 10px;
+.journal-select > button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-chevron {
+  flex: none;
+  margin-inline-start: auto;
   color: var(--muted);
 }
-.photo-filter::picker(select) {
+.journal-select::picker-icon,
+.journal-select option::checkmark {
+  content: none;
+  display: none;
+}
+.journal-select::picker(select) {
   margin-block: 4px;
   min-width: max(anchor-size(width), 150px);
   max-height: min(280px, 60dvh);
@@ -960,17 +977,17 @@ small {
     display 120ms allow-discrete,
     overlay 120ms allow-discrete;
 }
-.photo-filter:open::picker(select) {
+.journal-select:open::picker(select) {
   opacity: 1;
   pointer-events: auto;
   transition-duration: 160ms;
 }
 @starting-style {
-  .photo-filter:open::picker(select) {
+  .journal-select:open::picker(select) {
     opacity: 0;
   }
 }
-.photo-filter option {
+.journal-select option {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -980,16 +997,20 @@ small {
   font-size: 14px;
   cursor: pointer;
 }
-.photo-filter option:is(:hover, :focus-visible, :checked) {
+.journal-select option:is(:hover, :focus-visible, :checked) {
   background: var(--soft);
 }
-.photo-filter option::checkmark {
-  order: 1;
+.option-check {
+  flex: none;
   margin-inline-start: auto;
+  visibility: hidden;
+}
+option:checked > .option-check {
+  visibility: visible;
 }
 @media (prefers-reduced-motion: reduce) {
-  .photo-filter::picker(select),
-  .photo-filter:open::picker(select) {
+  .journal-select::picker(select),
+  .journal-select:open::picker(select) {
     transition: none;
   }
 }

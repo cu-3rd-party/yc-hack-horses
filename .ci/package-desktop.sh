@@ -19,9 +19,9 @@ signer=apple-codesign-0.29.0-x86_64-unknown-linux-musl
 curl -fsSL --retry 3 "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/$signer.tar.gz" -o "$tools_dir/signer.tar.gz"
 (cd "$tools_dir" && echo 'dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002  signer.tar.gz' | sha256sum --check && tar -xzf signer.tar.gz)
 "$tools_dir/$signer/rcodesign" sign --entitlements-xml-file node_modules/app-builder-lib/templates/entitlements.mac.plist release/mac-arm64/yc-hack-horses.app
-mac="Takhi-$version-macOS-arm64.zip"
-appimage="Takhi-$version-Linux-x86_64.AppImage"
-deb="Takhi-$version-Linux-amd64.deb"
+mac="ЛошID-$version-macOS-arm64.zip"
+appimage="ЛошID-$version-Linux-x86_64.AppImage"
+deb="ЛошID-$version-Linux-amd64.deb"
 (cd release/mac-arm64 && zip -qr -y "$tools_dir/$mac" yc-hack-horses.app)
 mv "$tools_dir/$mac" "$release/$mac"
 cp "release/yc-hack-horses-$version.AppImage" "$release/$appimage"

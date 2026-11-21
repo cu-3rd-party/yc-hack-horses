@@ -4,6 +4,7 @@ import { Aperture, FileText, Frame, ScanEye, Search, X, type LucideIcon } from '
 import type { Annotation, Photo, Point } from '../../journal/types';
 import { photoQuality } from '../../journal/fixtures';
 import { usePhotoURL } from '../../journal/media';
+import { Select } from './select';
 
 export function Thumbnail({
   photo,
@@ -242,24 +243,16 @@ function PhotoFilter({
   onChange: (value: string) => void;
 }) {
   return (
-    <select
-      className="filter-trigger photo-filter"
-      aria-label={label}
-      data-active={Boolean(value)}
+    <Select
+      label={label}
+      filterIcon={Icon}
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <button type="button">
-        <Icon size={16} aria-hidden="true" />
-        <span>{value || label}</span>
-      </button>
-      <option value="">{all}</option>
-      {[...new Set(options)].map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
+      onChange={onChange}
+      options={[
+        { value: '', label: all },
+        ...Array.from(new Set(options), (option) => ({ value: option, label: option })),
+      ]}
+    />
   );
 }
 export function PhotoGrid({

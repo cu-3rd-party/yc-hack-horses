@@ -54,14 +54,14 @@ export default function App() {
         <div className="sidebar-head">
           <button
             className="brand"
-            title="Тахи — распознавание"
-            aria-label="Тахи — распознавание"
+            title="ЛошID — распознавание"
+            aria-label="ЛошID — распознавание"
             onClick={() => setRoute('review')}
           >
             <span className="brand-icon">
               <Binoculars size={21} strokeWidth={1.7} />
             </span>
-            <strong>Тахи</strong>
+            <strong>ЛошID</strong>
           </button>
           <button
             className="sidebar-toggle"

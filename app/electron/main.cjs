@@ -22,7 +22,7 @@ protocol.registerSchemesAsPrivileged([
 
 function openJournal() {
   const win = new BrowserWindow({
-    title: 'Тахи · Полевой журнал',
+    title: 'ЛошID · Полевой журнал',
     width: 1340,
     height: 880,
     minWidth: 900,
