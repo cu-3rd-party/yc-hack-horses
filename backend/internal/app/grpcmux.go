@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -92,6 +93,15 @@ func certAuthInterceptors(caPool *x509.CertPool, log *slog.Logger) (grpc.UnarySe
 	auth := func(ctx context.Context) (context.Context, error) {
 		cert, err := clientCertFromMD(ctx)
 		if err != nil {
+			// Диагностика: какие заголовки вообще дошли (значения не логируем).
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				keys := make([]string, 0, len(md))
+				for k, v := range md {
+					keys = append(keys, fmt.Sprintf("%s(%d)", k, len(v)))
+				}
+				sort.Strings(keys)
+				log.Warn("grpc mux: unauthenticated request", "err", err, "md", strings.Join(keys, " "))
+			}
 			return ctx, status.Error(codes.Unauthenticated, "node certificate required")
 		}
 		caps := security.CapabilitiesForCert(cert, caPool, time.Now(), "")
