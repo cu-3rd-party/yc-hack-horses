@@ -4,6 +4,8 @@ import { useHorseHistory } from '../journal/use-journal';
 import { describeTraits, horsePhotos, type Notebook, type Photo } from '../journal/types';
 import { Heading, Back, Modal, Toggle } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
+import { FilterBar } from '../shared/ui/filter-bar';
+
 export function Gallery({ book }: { book: Notebook }) {
   const [selected, setSelected] = useState<string | null>(null),
     [search, setSearch] = useState('');
@@ -56,18 +58,22 @@ export function Gallery({ book }: { book: Notebook }) {
         title="Галерея особей"
         description="Фотографии, признаки и история полевых наблюдений каждой лошади."
       />
-      <div className="filters">
-        <label className="search">
-          <Search size={16} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Поиск особи"
-            placeholder="Найти особь по имени"
-          />
-        </label>
-        <small>{book.horses.length} в каталоге</small>
-      </div>
+      <FilterBar value={search} onChange={setSearch}>
+        {(draft, edit) => (
+          <>
+            <label className="search">
+              <Search size={16} />
+              <input
+                value={draft}
+                onChange={(e) => edit(e.target.value)}
+                aria-label="Поиск особи"
+                placeholder="Найти особь по имени"
+              />
+            </label>
+            <small>{book.horses.length} в каталоге</small>
+          </>
+        )}
+      </FilterBar>
       <div className="herd-grid">
         {visible.map((h) => {
           const images = horsePhotos(book, h.id);
@@ -102,7 +108,7 @@ export function Carousel({
   setIndex: (index: number) => void;
   close: () => void;
 }) {
-  const [traits, setTraits] = useState(false);
+  const [traits, setTraits] = useState(Boolean(photos[index]?.annotation.partMask));
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') {

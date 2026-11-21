@@ -4,7 +4,28 @@ import { Aperture, FileText, Frame, ScanEye, Search, X, type LucideIcon } from '
 import type { Annotation, Photo, Point } from '../../journal/types';
 import { photoQuality } from '../../journal/fixtures';
 import { usePhotoURL } from '../../journal/media';
+import { FilterBar } from './filter-bar';
 import { Select } from './select';
+
+// Anatomical colors match the indexed PNG produced by the local segmenter.
+const partColors = { body: '#2bc088', head: '#658cf8', ears: '#ffbb3d', muzzle: '#ee5b96' };
+const partLabels = { body: 'Корпус', head: 'Голова', ears: 'Уши', muzzle: 'Морда' };
+const traitColors: Record<string, string> = {
+  coat_light: partColors.body,
+  coat_warmth: partColors.body,
+  coat: partColors.body,
+  head_ratio: partColors.head,
+  cheek_light: partColors.head,
+  head: partColors.head,
+  ears: partColors.ears,
+  mane: partColors.ears,
+  muzzle_contrast: partColors.muzzle,
+  muzzle: partColors.muzzle,
+  Масть: partColors.body,
+  Морда: partColors.muzzle,
+  Грива: partColors.ears,
+};
+const otherColors = ['#bca0ff', '#f39458', '#54cbd6'];
 
 export function Thumbnail({
   photo,
@@ -49,6 +70,10 @@ export function MarkedPhoto({
     dx = (width - w) / 2,
     dy = (height - h) / 2;
   const line = annotation.outline.flatMap(([x, y]) => [x * w + dx, y * h + dy]);
+  const mask = annotation.partMask;
+  const colors = annotation.traits.map(
+    (trait, i) => traitColors[trait.key ?? trait.label] ?? otherColors[i % otherColors.length]!,
+  );
   const labels = annotation.traits.map(({ label, value }) => {
     if (/^[-−]?\d/.test(value)) return label + ' ' + value;
     const phrase = value.trim() + ' ' + label.toLocaleLowerCase('ru');
@@ -63,7 +88,11 @@ export function MarkedPhoto({
       <img
         src={src}
         onError={onError}
-        alt={traits && labels.length ? photo.name + '. ' + labels.join(', ') : photo.name}
+        alt={[
+          photo.name,
+          ...(traits && mask ? ['Маска частей тела'] : []),
+          ...(traits ? labels : []),
+        ].join('. ')}
         onLoad={(e) =>
           setDimensions({
             url: src ?? '',
@@ -79,46 +108,72 @@ export function MarkedPhoto({
       )}
       {(traits || highlight) && width > 0 && dimensions.url === src && (
         <div className="marks" aria-hidden="true">
+          {traits && mask && (
+            <svg className="part-mask" width={width} height={height} aria-hidden="true">
+              <image
+                href={'data:image/png;base64,' + mask.png}
+                x={dx + mask.box[0] * w}
+                y={dy + mask.box[1] * h}
+                width={(mask.box[2] - mask.box[0]) * w}
+                height={(mask.box[3] - mask.box[1]) * h}
+                preserveAspectRatio="none"
+                opacity={0.48}
+              />
+            </svg>
+          )}
           <Stage width={width} height={height} listening={false}>
             <Layer>
               {line.length > 0 && (
                 <Line
                   points={line}
                   closed
-                  stroke="#ffffff"
+                  stroke={partColors.body}
                   strokeWidth={2}
                   shadowColor="#101010"
                   shadowBlur={2}
                   shadowOpacity={0.9}
-                  fill="rgba(255,255,255,0.09)"
+                  fill={traits && !mask ? partColors.body + '24' : undefined}
                   lineJoin="round"
                 />
               )}
               {traits &&
-                annotation.traits.map(({ polygon, label }, i) =>
-                  polygon?.length ? (
+                annotation.traits.map(({ polygon, label, key }, i) =>
+                  polygon?.length &&
+                  !(
+                    key === 'coat_warmth' &&
+                    annotation.traits.some((t) => t.key === 'coat_light' && t.polygon?.length)
+                  ) ? (
                     <Line
                       key={label + i}
                       points={polygon.flatMap(([x, y]) => [dx + x * w, dy + y * h])}
                       closed
-                      stroke="white"
+                      stroke={colors[i]}
                       strokeWidth={1.5}
-                      fill="rgba(255,255,255,0.14)"
+                      fill={mask ? undefined : colors[i] + '57'}
                     />
                   ) : null,
                 )}
-              {marks.map(({ label, px, py, tx, ty, width }) => (
+              {marks.map(({ label, index, px, py, tx, ty, width }) => (
                 <Line
                   key={label}
                   points={[px, py, tx + width / 2, ty + 10]}
-                  stroke="#fff"
+                  stroke={colors[index]}
                   strokeWidth={1}
                 />
               ))}
-              {marks.map(({ label, px, py, tx, ty, width }) => (
+              {marks.map(({ label, index, px, py, tx, ty, width }) => (
                 <Group key={label}>
-                  <Circle x={px} y={py} radius={3.5} fill="#fff" stroke="#242424" />
-                  <Rect x={tx} y={ty} width={width} height={19} cornerRadius={4} fill="#222" />
+                  <Circle x={px} y={py} radius={3.5} fill={colors[index]} stroke="#242424" />
+                  <Rect
+                    x={tx}
+                    y={ty}
+                    width={width}
+                    height={19}
+                    cornerRadius={4}
+                    fill="#222"
+                    stroke={colors[index]}
+                    strokeWidth={1}
+                  />
                   <Text
                     x={tx + 6}
                     y={ty + 4}
@@ -134,6 +189,16 @@ export function MarkedPhoto({
               ))}
             </Layer>
           </Stage>
+          {traits && mask && (
+            <div className="mask-legend">
+              {(Object.keys(partColors) as (keyof typeof partColors)[]).map((part) => (
+                <span key={part}>
+                  <i style={{ background: partColors[part] }} />
+                  {partLabels[part]}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </>
@@ -157,6 +222,7 @@ export function MarkedPhoto({
   );
 }
 interface TraitMark {
+  index: number;
   label: string;
   px: number;
   py: number;
@@ -185,11 +251,12 @@ function placeTraitLabels(
   const placed: TraitMark[] = [];
   textMeasure.font = '11px Inter';
   const points = annotation.traits
-    .flatMap((trait, i) => (trait.at ? [{ at: trait.at, label: labels[i]! }] : []))
+    .flatMap((trait, i) => (trait.at ? [{ at: trait.at, label: labels[i]!, index: i }] : []))
     .sort((a, b) => a.at[1] - b.at[1]);
   for (const {
     at: [x, y],
     label,
+    index,
   } of points) {
     const px = image.x + x * image.width,
       py = image.y + y * image.height;
@@ -208,7 +275,7 @@ function placeTraitLabels(
           (p) => Math.abs(p.ty - v) >= 20 || tx >= p.tx + p.width + 2 || p.tx >= tx + width + 2,
         ),
       ) ?? candidates[0]!;
-    placed.push({ label, px, py, tx, ty, width });
+    placed.push({ index, label, px, py, tx, ty, width });
   }
   return placed;
 }
@@ -282,10 +349,8 @@ export function PhotoGrid({
   photos: Photo[];
   onSelect: (photo: Photo) => void;
 }) {
-  const [search, setSearch] = useState(''),
-    [angle, setAngle] = useState(''),
-    [framing, setFraming] = useState(''),
-    [quality, setQuality] = useState('');
+  const [filters, setFilters] = useState({ search: '', angle: '', framing: '', quality: '' });
+  const { search, angle, framing, quality } = filters;
   const visible = photos.filter(
     (p) =>
       p.name.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')) &&
@@ -295,56 +360,56 @@ export function PhotoGrid({
   );
   return (
     <>
-      <div className="filters">
-        <label className="search">
-          <Search size={16} />
-          <input
-            aria-label="Поиск по названию"
-            placeholder="Поиск по названию"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <PhotoFilter
-          label="Ракурс"
-          all="Все ракурсы"
-          icon={ScanEye}
-          options={photos.map((p) => p.angle)}
-          value={angle}
-          onChange={setAngle}
-        />
-        <PhotoFilter
-          label="План"
-          all="Все планы"
-          icon={Frame}
-          options={photos.map((p) => p.framing)}
-          value={framing}
-          onChange={setFraming}
-        />
-        <PhotoFilter
-          label="Качество"
-          all="Любое качество"
-          icon={Aperture}
-          options={photos.map(photoQuality)}
-          value={quality}
-          onChange={setQuality}
-        />
-        {(angle || framing || quality) && (
-          <button
-            type="button"
-            className="filter-clear"
-            aria-label="Сбросить фильтры"
-            title="Сбросить фильтры"
-            onClick={() => {
-              setAngle('');
-              setFraming('');
-              setQuality('');
-            }}
-          >
-            <X size={16} />
-          </button>
+      <FilterBar value={filters} onChange={setFilters}>
+        {(draft, edit) => (
+          <>
+            <label className="search">
+              <Search size={16} />
+              <input
+                aria-label="Поиск по названию"
+                placeholder="Поиск по названию"
+                value={draft.search}
+                onChange={(e) => edit({ ...draft, search: e.target.value })}
+              />
+            </label>
+            <PhotoFilter
+              label="Ракурс"
+              all="Все ракурсы"
+              icon={ScanEye}
+              options={photos.map((p) => p.angle)}
+              value={draft.angle}
+              onChange={(angle) => edit({ ...draft, angle })}
+            />
+            <PhotoFilter
+              label="План"
+              all="Все планы"
+              icon={Frame}
+              options={photos.map((p) => p.framing)}
+              value={draft.framing}
+              onChange={(framing) => edit({ ...draft, framing })}
+            />
+            <PhotoFilter
+              label="Качество"
+              all="Любое качество"
+              icon={Aperture}
+              options={photos.map(photoQuality)}
+              value={draft.quality}
+              onChange={(quality) => edit({ ...draft, quality })}
+            />
+            {(draft.angle || draft.framing || draft.quality) && (
+              <button
+                type="button"
+                className="filter-clear"
+                aria-label="Сбросить фильтры"
+                title="Сбросить фильтры"
+                onClick={() => edit({ ...draft, angle: '', framing: '', quality: '' })}
+              >
+                <X size={16} />
+              </button>
+            )}
+          </>
         )}
-      </div>
+      </FilterBar>
       {visible.length ? (
         <div className="photo-grid">
           {visible.map((p) => (

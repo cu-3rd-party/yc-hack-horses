@@ -64,6 +64,8 @@ func TestLocalComparisonOrientsImageAndKeepsEachInstance(t *testing.T) {
 	require.Equal(t, 1, calls)
 	require.Len(t, result, 2)
 	require.Equal(t, []Point{{.25, 0}, {.75, 0}, {.75, .5}, {.5, .5}, {.5, 1}, {.25, 1}}, result[0].Annotation.HorsePolygon)
+	require.Equal(t, &PartMask{PNG: mask, Box: [4]float64{.25, 0, .75, 1}}, result[0].Annotation.PartMask)
+	require.Equal(t, &PartMask{PNG: head, Box: [4]float64{.75, 0, 1, .5}}, result[1].Annotation.PartMask)
 	coat := []Point{{.25, 0}, {.5, 0}, {.5, .5}, {.25, .5}}
 	require.Equal(t, []Trait{{"coat_light", "0.25", coat}, {"coat_warmth", "1.5", coat}, {"head_ratio", "2", nil}}, result[0].Annotation.Traits)
 	require.Equal(t, []Point{{.75, 0}, {.875, 0}, {.875, .25}, {.75, .25}}, result[1].Annotation.HorsePolygon)

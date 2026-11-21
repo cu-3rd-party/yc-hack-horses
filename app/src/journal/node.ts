@@ -100,7 +100,9 @@ function annotation(data?: HorseAnnotation | null): Annotation {
   if (!data) return noMarks;
   return {
     outline: data.horse_polygon,
+    partMask: data.part_mask,
     traits: data.traits.map(({ key, value, polygon }) => ({
+      key,
       label: measurementLabels[key] ?? traitLabels[key] ?? key,
       value:
         measurementLabels[key] && value.trim() && Number.isFinite(Number(value))

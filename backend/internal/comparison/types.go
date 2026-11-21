@@ -10,9 +10,16 @@ type Trait struct {
 	Value   string  `json:"value"`
 	Polygon []Point `json:"polygon"`
 }
+
+// PartMask is the lossless indexed anatomical PNG inside its normalized frame box.
+type PartMask struct {
+	PNG []byte     `json:"png"`
+	Box [4]float64 `json:"box"`
+}
 type Annotation struct {
-	HorsePolygon []Point `json:"horse_polygon"`
-	Traits       []Trait `json:"traits"`
+	PartMask     *PartMask `json:"part_mask,omitempty"`
+	HorsePolygon []Point   `json:"horse_polygon"`
+	Traits       []Trait   `json:"traits"`
 }
 type Candidate struct {
 	HorseID     string  `json:"horse_id"`

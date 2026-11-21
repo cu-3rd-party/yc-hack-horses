@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
@@ -59,17 +60,13 @@ func localPrediction(row yolo.InstanceEmbedding, frame image.Rectangle) (Predict
 	if row.MeasurementError != "" {
 		return Prediction{}, fmt.Errorf("%w: %s", ErrLocalSegmentation, row.MeasurementError)
 	}
-	outline, err := maskPolygon(row.MaskPNG, row.Box, frame)
+	annotation, err := AnnotationFromMask(row.MaskPNG, row.Traits, row.Box, frame)
 	if err != nil {
 		return Prediction{}, err
 	}
-	if len(outline) == 0 {
-		return Prediction{}, ErrLocalSegmentation
-	}
-
 	p := Prediction{
 		Confidence: row.Confidence,
-		Annotation: Annotation{HorsePolygon: outline, Traits: []Trait{}},
+		Annotation: annotation,
 		Descriptor: Descriptor{Version: row.Embedding.ModelVersion, Vector: make([]float64, len(row.Embedding.Vector))},
 	}
 	for i, v := range row.Embedding.Vector {
@@ -78,23 +75,42 @@ func localPrediction(row yolo.InstanceEmbedding, frame image.Rectangle) (Predict
 	if p.Version == "" || unit(p.Vector) == nil {
 		return Prediction{}, ErrModel
 	}
-	if row.Traits == nil {
-		return p, nil
-	}
-	for _, key := range slices.Sorted(maps.Keys(row.Traits.Values)) {
-		value := row.Traits.Values[key]
-		if math.IsNaN(value) || math.IsInf(value, 0) {
-			return Prediction{}, ErrModel
-		}
-		layer := row.Traits.Layers[key]
-		if key == "coat_warmth" {
-			layer = row.Traits.Layers["coat_light"]
-		}
-		region, err := maskPolygon(layer, row.Box, frame)
-		if err != nil {
-			return Prediction{}, err
-		}
-		p.Annotation.Traits = append(p.Annotation.Traits, Trait{Key: key, Value: strconv.FormatFloat(value, 'g', -1, 64), Polygon: region})
-	}
 	return p, nil
+}
+
+// AnnotationFromMask places an instance's anatomical raster and measurement polygons
+// in the same oriented photo frame, for both uploads and saved reference crops.
+func AnnotationFromMask(mask []byte, evidence *reid.TraitEvidence, box, frame image.Rectangle) (Annotation, error) {
+	if box.Empty() || !box.In(frame) {
+		return Annotation{}, ErrModel
+	}
+	outline, err := maskPolygon(mask, box, frame)
+	if err != nil {
+		return Annotation{}, err
+	}
+	if len(outline) == 0 {
+		return Annotation{}, ErrLocalSegmentation
+	}
+	x := func(px int) float64 { return float64(px-frame.Min.X) / float64(frame.Dx()) }
+	y := func(py int) float64 { return float64(py-frame.Min.Y) / float64(frame.Dy()) }
+	annotation := Annotation{HorsePolygon: outline, Traits: []Trait{}, PartMask: &PartMask{PNG: mask, Box: [4]float64{x(box.Min.X), y(box.Min.Y), x(box.Max.X), y(box.Max.Y)}}}
+	if evidence == nil {
+		return annotation, nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(evidence.Values)) {
+		value := evidence.Values[key]
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return Annotation{}, ErrModel
+		}
+		layer := evidence.Layers[key]
+		if key == "coat_warmth" {
+			layer = evidence.Layers["coat_light"]
+		}
+		region, err := maskPolygon(layer, box, frame)
+		if err != nil {
+			return Annotation{}, err
+		}
+		annotation.Traits = append(annotation.Traits, Trait{Key: key, Value: strconv.FormatFloat(value, 'g', -1, 64), Polygon: region})
+	}
+	return annotation, nil
 }
