@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -92,7 +95,7 @@ func projectHorseCreated(ctx context.Context, tx *sqlstore.Store, ev domain.Even
 
 // projectObservationAdded: наблюдение уже есть — no-op.
 func projectObservationAdded(ctx context.Context, tx *sqlstore.Store, ev domain.Event) error {
-	var o domain.Observation
+	var o comparison.ObservationEvent
 	if err := json.Unmarshal(ev.Payload, &o); err != nil {
 		return fmt.Errorf("decode observation payload: %w", err)
 	}
@@ -102,7 +105,7 @@ func projectObservationAdded(ctx context.Context, tx *sqlstore.Store, ev domain.
 	if _, err := tx.GetObservation(ctx, o.ID); err == nil {
 		return nil
 	}
-	if err := tx.CreateObservation(ctx, o); err != nil {
+	if err := tx.CreateReviewedObservation(ctx, o); err != nil {
 		return fmt.Errorf("create observation: %w", err)
 	}
 	return nil
@@ -116,6 +119,10 @@ func projectBlobRegistered(ctx context.Context, tx *sqlstore.Store, ev domain.Ev
 	}
 	if b.SHA256 == "" {
 		b.SHA256 = ev.AggregateID
+	}
+	// Older senders included only SHA, so derive a stable, distinct ID for each original.
+	if b.ID == "" {
+		b.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("blob:"+b.SHA256)).String()
 	}
 	if _, err := tx.UpsertBlob(ctx, b); err != nil {
 		return fmt.Errorf("upsert blob: %w", err)

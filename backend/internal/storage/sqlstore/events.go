@@ -125,6 +125,13 @@ func (s *Store) GetMissingEvents(ctx context.Context, remote storage.VectorClock
 
 // LastSequence возвращает последний sequence ноды (0, если событий нет).
 func (s *Store) LastSequence(ctx context.Context, nodeID string) (uint64, error) {
+	// Local writers allocate the next sequence inside this transaction. Two
+	// PostgreSQL sessions must not read the same MAX before either commits.
+	if s.tx != nil && s.driver == "postgres" {
+		if _, err := s.exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", nodeID); err != nil {
+			return 0, err
+		}
+	}
 	var seq sql.NullInt64
 	err := s.queryRow(ctx, `SELECT MAX(sequence) FROM events WHERE node_id = ?`, nodeID).Scan(&seq)
 	if err != nil {

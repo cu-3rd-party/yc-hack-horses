@@ -59,7 +59,7 @@ func freePort(t *testing.T) string {
 
 // startNode собирает и запускает ноду: HTTP REST/WS + gRPC mTLS + sync-контур.
 // grpcAddrOverride — заранее выбранный gRPC-адрес ("" — авто).
-func startNode(t *testing.T, id, dataDir string, ca *testCA, peers []config.PeerConfig, grpcAddrOverride string) *e2eNode {
+func startNode(t *testing.T, id, dataDir string, ca *testCA, peers []config.PeerConfig, grpcAddrOverride string, options ...func(*config.Config)) *e2eNode {
 	t.Helper()
 	t.Setenv("MIGRATIONS_DIR", "../../migrations")
 	certFile, keyFile, caFile := ca.writeCertDir(t, filepath.Join(dataDir, "certs"), id, "node-"+short(id))
@@ -84,6 +84,9 @@ func startNode(t *testing.T, id, dataDir string, ca *testCA, peers []config.Peer
 	cfg.Sync.CentralURL = ""
 	cfg.Sync.Interval = time.Hour // фоновый цикл не мешает: тесты зовут SyncNow явно
 	cfg.Sync.Peers = peers
+	for _, apply := range options {
+		apply(cfg)
+	}
 	return startNodeWithConfig(t, cfg)
 }
 

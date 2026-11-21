@@ -1,4 +1,4 @@
-// Proposed /api/v1 comparison contract. All geometry uses the original image axes.
+// Go /api/v1 comparison contract. All geometry uses the original image axes.
 export type ImagePoint = [number, number];
 export interface HorseAnnotation {
   horse_polygon: ImagePoint[];

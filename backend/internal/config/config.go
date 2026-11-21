@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -66,7 +67,8 @@ type Config struct {
 	// Inference — локальный CV-движок (ADR-0012).
 	Inference struct {
 		// Engine — unavailable | reference | yolo (default: unavailable).
-		Engine string `yaml:"engine"`
+		Engine        string `yaml:"engine"`
+		ComparisonURL string `yaml:"comparison_url"`
 		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
 		ModelPath string `yaml:"model_path"`
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
@@ -146,6 +148,7 @@ func (c *Config) applyEnv() {
 	envString("SYNC_CENTRAL_URL", &c.Sync.CentralURL)
 	envInt("SYNC_BATCH_SIZE", &c.Sync.BatchSize)
 	envDuration("SYNC_INTERVAL", &c.Sync.Interval)
+	envString("INFER_COMPARISON_URL", &c.Inference.ComparisonURL)
 	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
@@ -186,6 +189,12 @@ func envDuration(key string, dst *time.Duration) {
 
 // Validate проверяет значения конфигурации до запуска сервисов.
 func (c *Config) Validate() error {
+	if c.Inference.ComparisonURL != "" {
+		u, err := url.Parse(c.Inference.ComparisonURL)
+		if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("config: inference.comparison_url must be an HTTP(S) endpoint")
+		}
+	}
 	switch c.Storage.Driver {
 	case "sqlite", "postgres":
 	default:

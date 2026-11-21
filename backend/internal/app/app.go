@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
@@ -156,15 +157,16 @@ func New(cfg *config.Config) (*App, error) {
 		})
 	}
 	handler := httpapi.NewRouter(httpapi.Deps{
-		Store:       store,
-		Blobs:       blobs,
-		Hub:         a.hub,
-		NodeID:      nodeID,
-		RoleHint:    cfg.Node.RoleHint,
-		AppVersion:  cfg.AppVersion,
-		SyncStats:   a.syncStatsSnapshot,
-		Engine:      cvEngine,
-		DocsEnabled: cfg.Api.DocsEnabled,
+		Store:           store,
+		Blobs:           blobs,
+		Hub:             a.hub,
+		NodeID:          nodeID,
+		RoleHint:        cfg.Node.RoleHint,
+		AppVersion:      cfg.AppVersion,
+		SyncStats:       a.syncStatsSnapshot,
+		Engine:          cvEngine,
+		ComparisonModel: comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL},
+		DocsEnabled:     cfg.Api.DocsEnabled,
 	})
 	srvHandler := http.Handler(handler)
 	if cfg.Network.GRPCMultiplex {

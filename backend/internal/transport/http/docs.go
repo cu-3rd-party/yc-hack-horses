@@ -54,6 +54,7 @@ type pathItem struct {
 	Summary   string     `yaml:"summary,omitempty"`
 	Get       *operation `yaml:"get,omitempty"`
 	Post      *operation `yaml:"post,omitempty"`
+	Put       *operation `yaml:"put,omitempty"`
 	Patch     *operation `yaml:"patch,omitempty"`
 	WebSocket string     `yaml:"x-websocket,omitempty"`
 }
@@ -168,6 +169,8 @@ func buildOpenAPISpec() []byte {
 			item.Get = op
 		case "post":
 			item.Post = op
+		case "put":
+			item.Put = op
 		case "patch":
 			item.Patch = op
 		}
@@ -244,10 +247,31 @@ func buildOpenAPISpec() []byte {
 		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
 	})
 
+	create := add("/api/v1/comparisons", "post", "Сравнить лошадей на снимке", "createComparison", "comparisons", "Каждая детекция имеет свою разметку и список особей по косинусному сходству.")
+	create.RequestBody = &requestBody{Required: true, Content: jsonContent(schemaRef("ComparisonRequest"))}
+	create.Responses = merge(stdErrors(true), map[string]resp{
+		"201": createdJSON(schemaRef("ComparisonResult")),
+		"422": {Description: "Некорректный хеш или top_k", Content: errorRef},
+		"502": {Description: "Некорректный ответ модели", Content: errorRef},
+		"503": {Description: "Сегментация недоступна", Content: errorRef},
+	})
+	decide := add("/api/v1/comparisons/{id}/detections/{detection}/decision", "put", "Сохранить решение", "decideComparison", "comparisons", "Повтор того же решения возвращает сохранённое наблюдение.")
+	decide.Parameters = []parameter{idParam("id", "UUID сравнения"), idParam("detection", "UUID детекции")}
+	decide.RequestBody = &requestBody{Required: true, Content: jsonContent(schemaRef("ComparisonDecision"))}
+	decide.Responses = merge(stdErrors(true), map[string]resp{
+		"200": okJSON(schemaRef("DecisionResult")),
+		"409": {Description: "Детекция пропущена или уже сохранена с другим решением", Content: errorRef},
+		"422": {Description: "Некорректное решение или особь отсутствует среди кандидатов", Content: errorRef},
+	})
+	cancel := add("/api/v1/comparisons/{id}/cancel", "post", "Отменить сравнение", "cancelComparison", "comparisons", "Сохраняет подтверждённые наблюдения и пропускает остальные детекции.")
+	cancel.Parameters = []parameter{idParam("id", "UUID сравнения")}
+	cancel.Responses = merge(stdErrors(true), map[string]resp{"200": okJSON(schemaRef("CancelResult"))})
+
 	// --- observations ---
 	listObs := add("/api/v1/observations", "get", "Список наблюдений", "listObservations", "observations",
 		"Опциональный фильтр horse_id.")
-	listObs.Parameters = []parameter{{Name: "horse_id", In: "query", Schema: strSchema("UUID лошади, пусто — все")}}
+	listObs.Parameters = []parameter{{Name: "horse_id", In: "query", Schema: strSchema("UUID лошади, пусто — все")},
+		{Name: "include", In: "query", Schema: strSchema("photos,annotations — добавить фотографии и их разметку")}}
 	listObs.Responses = map[string]resp{
 		"200": okJSON(schemaNode{"type": "array", "items": schemaNode{"$ref": "#/components/schemas/Observation"}}),
 	}
@@ -357,6 +381,7 @@ func buildOpenAPISpec() []byte {
 		prop("identity_status", strSchema("active | merged | unresolved")).
 		prop("metadata", schemaNode{"type": "object", "additionalProperties": schemaNode{"type": "string"}}).
 		required("id", "created_at", "identity_status", "metadata")
+	addComparisonSchemas(schemas)
 	schemas["Observation"] = schemaNode{"type": "object"}.
 		prop("id", strSchema("UUIDv7")).
 		prop("horse_id", strSchema("пусто, если животное ещё не идентифицировано")).
@@ -365,6 +390,8 @@ func buildOpenAPISpec() []byte {
 		prop("location", strSchema("текст или latlon")).
 		prop("observer_id", strSchema("идентификатор наблюдателя")).
 		prop("blob_ids", schemaNode{"type": "array", "items": strSchema("blobs.id")}).
+		prop("name", strSchema("Имя наблюдения")).
+		prop("photos", schemaArray(schemaRef("ObservationPhoto"))).
 		prop("trait_snapshot_id", strSchema("привязанный снимок признаков, опционально")).
 		required("id", "node_id", "observed_at", "location", "observer_id", "blob_ids")
 	schemas["Blob"] = schemaNode{"type": "object"}.
