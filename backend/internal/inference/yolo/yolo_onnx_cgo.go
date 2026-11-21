@@ -23,6 +23,7 @@ import (
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 )
 
 // Engine — InferenceEngine на детекции YOLO. Лениво загружает модель: если
@@ -294,8 +295,11 @@ func (e *Engine) ModelsChanged(dir string) {
 		e.loadErr = nil
 	}
 	if e.cfg.ReIDModelDir == "" {
-		if _, err := os.Stat(filepath.Join(dir, "megadescriptor-l-384.onnx")); err == nil {
-			e.cfg.ReIDModelDir = dir
+		for _, name := range []string{modelassets.DescriptorONNX, modelassets.DescriptorCheckpoint} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				e.cfg.ReIDModelDir = dir
+				break
+			}
 		}
 	}
 	if e.encoderErr != nil {

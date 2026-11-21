@@ -4,6 +4,7 @@ package modelassets
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,9 +37,11 @@ type Status struct {
 }
 type artifact struct {
 	Status
-	path, sha, source string
-	received          atomic.Int64
-	cancel            context.CancelFunc
+	modelFile
+	alternative modelFile
+	source      string
+	received    atomic.Int64
+	cancel      context.CancelFunc
 }
 type Manager struct {
 	mu        sync.Mutex
@@ -64,10 +67,19 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 		size                  int64
 	}{
 		{"yolo", "yolov8n.onnx", DetectorSHA, "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx", 12851049},
-		{"megadescriptor", "megadescriptor-l-384.onnx", DescriptorSHA, "", 0},
+		{"megadescriptor", DescriptorCheckpoint, checkpointSHA, checkpointURL, checkpointSize},
 		{"dinov2", "dinov2-small.onnx", DinoSHA, "https://huggingface.co/Xenova/dinov2-small/resolve/c2bb04a51fab207c420665f1946016107bffc701/onnx/model.onnx", 88459888},
 		{"part-heads", "part-heads.f32", HeadsSHA, "", 6192},
 	} {
+		var alternative modelFile
+		if spec.id == "megadescriptor" {
+			alternative = modelFile{filepath.Join(dir, DescriptorONNX), DescriptorSHA}
+			if baseURL != "" {
+				// Existing mirrors serve the project's standalone ONNX export.
+				alternative = modelFile{filepath.Join(dir, DescriptorCheckpoint), checkpointSHA}
+				spec.name, spec.sha, spec.size = DescriptorONNX, DescriptorSHA, 0
+			}
+		}
 		path := filepath.Join(dir, spec.name)
 		if spec.id == "yolo" {
 			path = detector
@@ -76,7 +88,7 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 		if baseURL != "" {
 			source = strings.TrimRight(baseURL, "/") + "/" + spec.name
 		}
-		a := &artifact{Status: Status{ID: spec.id, Filename: spec.name, State: "checking", HasSource: source != "", Size: spec.size}, path: path, sha: spec.sha, source: source}
+		a := &artifact{Status: Status{ID: spec.id, Filename: spec.name, State: "checking", HasSource: source != "", Size: spec.size}, modelFile: modelFile{path, spec.sha}, alternative: alternative, source: source}
 		m.files = append(m.files, a)
 	}
 	m.jobs.Add(1)
@@ -89,20 +101,14 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 	return m
 }
 func (m *Manager) check(a *artifact) {
-	f, err := os.Open(a.path)
+	_, n, err := installedFile(a.modelFile, a.alternative)
 	state, message := "missing", ""
-	var n int64
 	if err == nil {
-		h := sha256.New()
-		n, err = io.Copy(h, f)
-		f.Close()
-		if err == nil && fmt.Sprintf("%x", h.Sum(nil)) == a.sha {
-			state = "ready"
-		} else {
-			state = "error"
-			message = "Контрольная сумма файла не совпала."
-		}
-	} else if !os.IsNotExist(err) {
+		state = "ready"
+	} else if errors.Is(err, errChecksum) {
+		state = "error"
+		message = "Контрольная сумма файла не совпала."
+	} else if !errors.Is(err, os.ErrNotExist) {
 		state = "error"
 		message = "Не удалось прочитать файл модели."
 	}
@@ -110,6 +116,7 @@ func (m *Manager) check(a *artifact) {
 	defer m.mu.Unlock()
 	a.State, a.Message = state, message
 	if state == "ready" {
+		a.Size = n
 		a.Total = n
 		a.received.Store(n)
 	}
@@ -228,6 +235,9 @@ func (m *Manager) download(ctx context.Context, a *artifact, link string, custom
 	}
 	m.mu.Lock()
 	a.Total = max(resp.ContentLength, 0)
+	if resp.ContentLength < 0 && !customSource {
+		a.Total = a.Size
+	}
 	m.mu.Unlock()
 	if err = os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
 		return fmt.Errorf("Не удалось создать каталог моделей.")

@@ -25,6 +25,7 @@ const decimal = new Intl.NumberFormat('ru', { maximumFractionDigits: 1 });
 function formatSize(bytes: number) {
   if (bytes < 1000) return decimal.format(bytes) + ' Б';
   if (bytes < 1_000_000) return decimal.format(bytes / 1000) + ' КБ';
+  if (bytes >= 1_000_000_000) return new Intl.NumberFormat('ru', { maximumFractionDigits: 2 }).format(bytes / 1_000_000_000) + ' ГБ';
   return decimal.format(bytes / 1_000_000) + ' МБ';
 }
 function ModelRow({ file }: { file: ModelFile }) {
