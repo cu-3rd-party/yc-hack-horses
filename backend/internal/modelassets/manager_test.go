@@ -1,9 +1,11 @@
 package modelassets
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -121,7 +123,7 @@ func TestDescriptorInstallsFromButtonAndRecognizesExistingExport(t *testing.T) {
 	require.Equal(t, "ready", m.Status()[1].State)
 }
 
-func TestPartHeadsInstallOfflineAndSurviveRestart(t *testing.T) {
+func TestPartHeadsDownloadFromKaggleAndSurviveRestart(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "part-heads.f32")
 	open := func() *Manager {
@@ -133,21 +135,34 @@ func TestPartHeadsInstallOfflineAndSurviveRestart(t *testing.T) {
 
 	m := open()
 	row := m.Status()[3]
-	require.True(t, row.Bundled)
 	require.True(t, row.HasSource)
 	require.Equal(t, "missing", row.State)
 	require.NoFileExists(t, path)
-	m.client = nil // Any attempt to make a network request would fail.
+	fixture, err := os.ReadFile("part-heads.f32")
+	require.NoError(t, err)
+	const publicURL = "https://www.kaggle.com/api/v1/datasets/download/sorrowdev/loshid-horse-part-heads/part-heads.f32?datasetVersionNumber=1"
+	require.Equal(t, publicURL, m.find("part-heads").source)
+	gotRequest := make(chan string, 1)
+	m.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		gotRequest <- r.Method + " " + r.URL.String()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(fixture)), ContentLength: int64(len(fixture))}, nil
+	})}
 	require.NoError(t, m.Start("part-heads", ""))
 	require.Eventually(t, func() bool { return m.Status()[3].State == "ready" }, time.Second, time.Millisecond)
+	require.Len(t, gotRequest, 1)
+	require.Equal(t, "GET "+publicURL, <-gotRequest)
 	payload, err := os.ReadFile(path)
 	require.NoError(t, err)
 	require.Len(t, payload, 4*(384+3)*4)
-	require.Equal(t, trainedHeadsSHA, fmt.Sprintf("%x", sha256.Sum256(payload)))
+	require.Equal(t, HeadsSHA, fmt.Sprintf("%x", sha256.Sum256(payload)))
 	require.Equal(t, "ready", open().Status()[3].State)
-	require.True(t, MatchesSHA(HeadsSHA, HeadsSHA))
-	require.False(t, MatchesSHA(DinoSHA, trainedHeadsSHA))
+	require.True(t, MatchesSHA(HeadsSHA, legacyHeadsSHA))
+	require.False(t, MatchesSHA(DinoSHA, HeadsSHA))
 	payload[0] ^= 1
 	require.NoError(t, os.WriteFile(path, payload, 0600))
 	require.Equal(t, "error", open().Status()[3].State)
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
