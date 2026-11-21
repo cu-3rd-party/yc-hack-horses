@@ -19,3 +19,7 @@ coverage/
 # YOLO-веса и onnxruntime shared library — вне git (infra/scripts/download-yolo-model.sh)
 infra/models/
 .turbo/
+agents.md
+infra/horse30/
+photos-segmentation/
+photos/

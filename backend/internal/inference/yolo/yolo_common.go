@@ -1,5 +1,32 @@
 package yolo
 
+import (
+	"image"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
+)
+
+type Config struct {
+	ModelPath      string
+	RuntimeLibPath string
+	// ReIDModelDir enables visual retrieval and separate per-instance measurements.
+	ReIDModelDir  string
+	IncludeMasks  bool
+	ConfThreshold float64
+	IouThreshold  float64
+	Blobs         inference.BlobFetcher
+	Delegate      TraitDelegate
+}
+
+type InstanceEmbedding struct {
+	Box              image.Rectangle
+	Embedding        inference.EmbeddingResult
+	MaskPNG          []byte
+	Traits           *reid.TraitEvidence
+	MeasurementError string
+}
+
 // ModelVersion — версия связки модель+эвристика. Меняется при смене весов.
 const ModelVersion = "yolov8n-coco-v1"
 

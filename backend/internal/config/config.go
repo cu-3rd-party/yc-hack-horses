@@ -72,7 +72,8 @@ type Config struct {
 		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
 		ModelPath string `yaml:"model_path"`
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
-		RuntimeLib string `yaml:"runtime_lib"`
+		RuntimeLib   string `yaml:"runtime_lib"`
+		ReIDModelDir string `yaml:"reid_model_dir"`
 	} `yaml:"inference"`
 	// Api — HTTP API ноды.
 	Api struct {
@@ -152,6 +153,7 @@ func (c *Config) applyEnv() {
 	envString("INFER_ENGINE", &c.Inference.Engine)
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
+	envString("INFER_REID_MODEL_DIR", &c.Inference.ReIDModelDir)
 	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)

@@ -9,19 +9,10 @@ package yolo
 import (
 	"context"
 	"fmt"
+	"image"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 )
-
-// Config — та же сигнатура, что в cgo-варианте (поля onnx игнорируются).
-type Config struct {
-	ModelPath      string
-	RuntimeLibPath string
-	ConfThreshold  float64
-	IouThreshold   float64
-	Blobs          inference.BlobFetcher
-	Delegate       TraitDelegate
-}
 
 // Engine — заглушка: инференсу нужен onnxruntime через cgo.
 type Engine struct {
@@ -53,3 +44,9 @@ func (e *Engine) Embed(ctx context.Context, input inference.ImageInput) (inferen
 	}
 	return inference.EmbeddingResult{}, e.unavailable()
 }
+
+func (e *Engine) EmbedInstances(ctx context.Context, input inference.ImageInput, _ *image.Rectangle) ([]InstanceEmbedding, error) {
+	_, err := e.Embed(ctx, input)
+	return nil, err
+}
+func (e *Engine) Close() error { return nil }
