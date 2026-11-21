@@ -3,6 +3,8 @@ package inference
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Канонизация/fingerprint: одинаковый набор признаков → одинаковый fingerprint,
@@ -22,21 +24,14 @@ func TestFingerprintDeterministic(t *testing.T) {
 		"unknown_key": "ignored",
 	}
 	fa, fb := Fingerprint(a), Fingerprint(b)
-	if fa == "" || len(fa) != 64 {
-		t.Fatalf("fingerprint must be sha256 hex, got %q", fa)
-	}
-	if fa != fb {
-		t.Fatalf("same traits must give same fingerprint: %s != %s", fa, fb)
-	}
+	require.Len(t, fa, 64, "fingerprint must be sha256 hex")
+	require.NotEqual(t, "", fa, "fingerprint must be sha256 hex")
+	require.Equal(t, fb, fa, "same traits must give same fingerprint")
 	// разный набор → другой fingerprint
 	c := map[string]string{"coat": "bay"}
-	if Fingerprint(c) == fa {
-		t.Fatal("different traits must give different fingerprint")
-	}
+	require.NotEqual(t, fa, Fingerprint(c), "different traits must give different fingerprint")
 	// регистр значения не важен
-	if Fingerprint(map[string]string{"coat": "DUN"}) != Fingerprint(map[string]string{"coat": "dun"}) {
-		t.Fatal("value case must not change fingerprint")
-	}
+	require.Equal(t, Fingerprint(map[string]string{"coat": "dun"}), Fingerprint(map[string]string{"coat": "DUN"}), "value case must not change fingerprint")
 }
 
 func TestCanonicalizeDropsUnknown(t *testing.T) {
@@ -47,35 +42,22 @@ func TestCanonicalizeDropsUnknown(t *testing.T) {
 		"coat2":  "dun",   // неизвестный ключ — отбрасывается
 	})
 	want := map[string]string{"coat": "dun", "scars": "visible"}
-	if len(got) != len(want) {
-		t.Fatalf("canonicalize: got %v, want %v", got, want)
-	}
-	for k, v := range want {
-		if got[k] != v {
-			t.Fatalf("canonicalize[%q]: got %q, want %q", k, got[k], v)
-		}
-	}
+	require.Equal(t, want, got, "canonicalize")
 }
 
 func TestCanonicalizeDropsInvalidValues(t *testing.T) {
 	got := canonicalize(map[string]string{"coat": "polka-dot"})
-	if len(got) != 0 {
-		t.Fatalf("invalid value must be dropped, got %v", got)
-	}
+	require.Empty(t, got, "invalid value must be dropped")
 }
 
 func TestMarshalCanonical(t *testing.T) {
 	raw, err := MarshalCanonical(map[string]string{"muzzle": "light", "coat": "dun"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var m map[string]string
-	if err := json.Unmarshal(raw, &m); err != nil {
-		t.Fatal(err)
-	}
-	if len(m) != 2 || m["coat"] != "dun" || m["muzzle"] != "light" {
-		t.Fatalf("unexpected canonical JSON: %s", raw)
-	}
+	require.NoError(t, json.Unmarshal(raw, &m))
+	require.Len(t, m, 2, "unexpected canonical JSON: %s", raw)
+	require.Equal(t, "dun", m["coat"], "unexpected canonical JSON: %s", raw)
+	require.Equal(t, "light", m["muzzle"], "unexpected canonical JSON: %s", raw)
 }
 
 func TestCanonicalKeysComplete(t *testing.T) {
@@ -84,15 +66,9 @@ func TestCanonicalKeysComplete(t *testing.T) {
 		"head": true, "muzzle": true, "ears": true, "coat": true,
 		"mane": true, "proportions": true, "markings": true, "scars": true,
 	}
-	if len(CanonicalKeys) != len(want) {
-		t.Fatalf("CanonicalKeys = %v, want 8 keys", CanonicalKeys)
-	}
+	require.Len(t, CanonicalKeys, len(want), "CanonicalKeys = %v", CanonicalKeys)
 	for _, k := range CanonicalKeys {
-		if !want[k] {
-			t.Fatalf("unexpected canonical key %q", k)
-		}
-		if allowedValues[k] == nil {
-			t.Fatalf("no allowed values for key %q", k)
-		}
+		require.True(t, want[k], "unexpected canonical key %q", k)
+		require.NotNil(t, allowedValues[k], "no allowed values for key %q", k)
 	}
 }

@@ -151,6 +151,35 @@ make dev-certs   # bash infra/scripts/gen-dev-certs.sh — development-only
   добавлять: `security.Config.Validate` запрещает пустой `ca_file`
   (self-signed auto-trust запрещён).
 
+## gRPC за ingress (grpc_multiplex)
+
+Центральная нода в self-service живёт за Traefik ingress: наружу открыт только
+443, TLS терминируется на ingress, а бэкенд получает запросы по h2c. Чтобы
+gRPC-клиенты работали через тот же домен (`yc-hack-horses.cu3rd.ru:443`), включён
+мультиплекс-режим:
+
+- `network.grpc_multiplex: true` (env `GRPC_MULTIPLEX`) — на
+  `network.listen_addr` (8080) работает обёртка
+  `golang.org/x/net/http2/h2c`: запросы HTTP/2 с `content-type: application/grpc`
+  уходят в gRPC-сервер синхронизации, всё остальное — в REST-роутер.
+- Прямой mTLS-порт `GRPC_LISTEN_ADDR` (9443) остаётся как есть (mTLS при
+  настроенных сертификатах) — для прямых подключений внутри кластера он не
+  задействован ingress'ом.
+- Аутентификация через ingress: Traefik-middleware `passTLSClientCert`
+  (`pem: true`) прокидывает клиентский серт в заголовке
+  `X-Forwarded-Tls-Client-Cert`; gRPC-интерцепторы мультиплекс-режима проверяют
+  его против `security.ca_file` (цепочка, срок действия, URI SAN
+  `przewalski://node/<id>`, полномочия SendEvents+ReceiveEvents). Нет заголовка
+  или невалидный серт → gRPC `Unauthenticated`. Traefik выставляет этот заголовок
+  из состояния TLS-соединения, поэтому значение, подделанное самим клиентом,
+  игнорируется (в установленной версии Traefik CRD v3.7 у passTLSClientCert нет
+  опции `perms.flag` — подмена отсекается самим фактом перезаписи заголовка).
+  Для запроса клиентского серта ingress'ом на роутере включён TLSOption с
+  `clientAuth: {clientAuthType: RequestClientCert}` (сёрт не проверяется на
+  ingress — полную проверку выполняет бэкенд против dev-CA).
+- `grpc_multiplex` требует `security.ca_file` — без CA конфиг отвергается
+  (fail closed).
+
 ## Документация
 - ADR: `docs/adr/`
 - Протокол синхронизации: `backend/api/proto/sync/v1/sync.proto`

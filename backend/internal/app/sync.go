@@ -255,18 +255,16 @@ func (s *syncRuntime) dial(ctx context.Context, entry peerEntry) (*peerConn, err
 	switch {
 	case entry.Kind == kindCentral:
 		// central: SNI и проверка имени зафиксированы на central-домен
-		// (security.ClientTLSConfigForCentral), caPool может быть nil —
-		// тогда используется системный пул публичных CA.
+		// (security.ClientTLSConfigForCentral). Серверный серт проверяем
+		// системным пулом публичных CA (nil) — по ADR-0008 центральную
+		// идентичность подтверждает валидный публичный серт на central-
+		// hostname; dev-CA доверяем только peer-идентичности локальных нод.
 		secCfg := s.securityConfig()
-		caPool, err := security.LoadCAPool(secCfg.CAFile)
+		tlsCfg, err := security.ClientTLSConfigForCentral(secCfg, nil)
 		if err != nil {
 			return nil, err
 		}
-		tlsCfg, err := security.ClientTLSConfigForCentral(secCfg, caPool)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.verifyCentralIdentity(tlsCfg, caPool); err != nil {
+		if err := s.verifyCentralIdentity(tlsCfg, nil); err != nil {
 			return nil, err
 		}
 		creds = credentials.NewTLS(tlsCfg)

@@ -12,7 +12,9 @@ package app
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +26,7 @@ import (
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
@@ -35,6 +38,32 @@ import (
 
 	"google.golang.org/grpc"
 )
+
+// syncEnabledForCert проверяет, что клиентский серт ноды несёт node-identity
+// (URI SAN) — иначе нода не может пройти caps-проверку как пир и исходящий
+// sync бессмыслен (см. security.CapabilitiesForCert). Серт может быть не
+// сконфигурирован (plain-режим) — sync в этом случае не запрещаем: проверка
+// происходит на стороне пира.
+func syncEnabledForCert(certFile string) bool {
+	if certFile == "" {
+		return true // без серта решение остаётся за пиром (loopback/plain)
+	}
+	pemBytes, err := os.ReadFile(certFile)
+	if err != nil {
+		slog.Warn("sync: чтение клиентского серта", "err", err)
+		return true // пусть sync попытается и получит понятную ошибку
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return true
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return true
+	}
+	_, idErr := identity.NodeIDFromCert(cert)
+	return idErr == nil
+}
 
 // App — собранная нода.
 type App struct {
@@ -51,6 +80,9 @@ type App struct {
 
 	grpcSrv *grpc.Server
 	grpcLn  net.Listener
+	// muxGRPCSrv — gRPC-сервер для h2c-мультиплекс-порта (grpc_multiplex):
+	// TLS терминирует ingress, аутентификация — по серту из заголовка.
+	muxGRPCSrv *grpc.Server
 
 	announcer *discovery.Announcer
 	// bg хранит функции остановки фоновых контуров (sync, discovery, gRPC).
@@ -134,9 +166,26 @@ func New(cfg *config.Config) (*App, error) {
 		Engine:      cvEngine,
 		DocsEnabled: cfg.Api.DocsEnabled,
 	})
+	srvHandler := http.Handler(handler)
+	if cfg.Network.GRPCMultiplex {
+		muxSrv, err := newMuxGRPCServer(cfg, identity, a.pstore, a.blobs, slog.Default())
+		if err != nil {
+			store.Close() //nolint:errcheck // ошибка сборки важнее
+			return nil, err
+		}
+		a.muxGRPCSrv = muxSrv
+		wrapped, err := newMuxHandler(muxSrv, handler)
+		if err != nil {
+			store.Close() //nolint:errcheck // ошибка сборки важнее
+			return nil, err
+		}
+		srvHandler = wrapped
+		a.addStop(func() { muxSrv.GracefulStop() })
+		slog.Info("grpc multiplex enabled", "addr", cfg.Network.ListenAddr)
+	}
 	a.srv = &http.Server{
 		Addr:              cfg.Network.ListenAddr,
-		Handler:           handler,
+		Handler:           srvHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return a, nil
@@ -213,7 +262,13 @@ func (a *App) Run(ctx context.Context) error {
 		_ = a.srv.Close()
 		return err
 	}
-	if a.cfg.Sync.Enabled {
+	if a.cfg.Sync.Enabled && !syncEnabledForCert(a.cfg.Security.CertFile) {
+		// Серт без URI SAN node_id не может аутентифицировать ноду как пира
+		// (CapabilitiesForCert → CapNone): sync-цикл запускать бессмысленно.
+		// Так бывает у central-нод за ingress, чей серт — только серверный
+		// (DNS SAN); иначе центр вечно дёргает сам себя и пишет Unauthenticated.
+		slog.Info("sync loop disabled: client cert has no node identity (URI SAN)")
+	} else if a.cfg.Sync.Enabled {
 		// central — исходящий sync: адрес из sync.central_url, доверие по
 		// VerifyCentralIdentity (hostname + серверный серт), см. sync.go.
 		if a.cfg.Sync.CentralURL != "" {

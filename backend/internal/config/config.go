@@ -38,8 +38,15 @@ type Config struct {
 	Network struct {
 		ListenAddr     string `yaml:"listen_addr"`
 		GRPCListenAddr string `yaml:"grpc_listen_addr"`
-		MdnsEnabled    bool   `yaml:"mdns_enabled"`
-		ServiceName    string `yaml:"service_name"`
+		// GRPCMultiplex — gRPC и REST живут на одном listen_addr (h2c):
+		// запросы с content-type application/grpc и ProtoMajor==2 уходят
+		// в gRPC-сервер, остальное — в REST. Для central-ноды за ingress:
+		// TLS терминируется на ingress, клиентский серт приходит в
+		// заголовке X-Forwarded-Tls-Client-Cert и проверяется интерцептором
+		// против security.ca_file (см. internal/app/grpcmux.go).
+		GRPCMultiplex bool   `yaml:"grpc_multiplex"`
+		MdnsEnabled   bool   `yaml:"mdns_enabled"`
+		ServiceName   string `yaml:"service_name"`
 	} `yaml:"network"`
 	Security struct {
 		CertFile        string `yaml:"cert_file"`
@@ -128,6 +135,7 @@ func (c *Config) applyEnv() {
 	envString("NODE_DSN", &c.Storage.DSN)
 	envString("LISTEN_ADDR", &c.Network.ListenAddr)
 	envString("GRPC_LISTEN_ADDR", &c.Network.GRPCListenAddr)
+	envBool("GRPC_MULTIPLEX", &c.Network.GRPCMultiplex)
 	envBool("MDNS_ENABLED", &c.Network.MdnsEnabled)
 	envString("SERVICE_NAME", &c.Network.ServiceName)
 	envString("CERT_FILE", &c.Security.CertFile)
@@ -191,6 +199,13 @@ func (c *Config) Validate() error {
 	}
 	if _, _, err := net.SplitHostPort(c.Network.GRPCListenAddr); err != nil {
 		return fmt.Errorf("config: network.grpc_listen_addr %q: %w", c.Network.GRPCListenAddr, err)
+	}
+	// grpc_multiplex: аутентификация gRPC-клиентов идёт по серту из
+	// заголовка ingress, поэтому без ca_file мультиплекс запрещён
+	// (fail closed: анонимный gRPC наружу не открывается).
+	if c.Network.GRPCMultiplex && c.Security.CAFile == "" {
+		return fmt.Errorf("config: network.grpc_multiplex=true требует security.ca_file — " +
+			"без него gRPC-клиенты за ingress не могут быть аутентифицированы")
 	}
 	for _, p := range c.Sync.Peers {
 		if _, _, err := net.SplitHostPort(p.Addr); err != nil {
