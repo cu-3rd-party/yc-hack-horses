@@ -35,7 +35,7 @@ export function useNotebook() {
 export function useHorseHistory(book: Notebook, horseId?: string) {
   const demo = useDemo();
   return useQuery({
-    queryKey: ['horse-history', 'node', horseId],
+    queryKey: ['horse-history', demo ? 'demo' : 'node', horseId],
     enabled: !demo && Boolean(horseId),
     queryFn: ({ signal }) => getHorseHistory(horseId!, book, signal),
     staleTime: 30000,
