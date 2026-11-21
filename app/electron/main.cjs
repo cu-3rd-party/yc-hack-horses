@@ -47,6 +47,8 @@ app.whenReady().then(() => {
   const root = path.resolve(__dirname, '../dist');
   protocol.handle('journal', async (request) => {
     const url = new URL(request.url);
+    if (url.host === 'app' && url.pathname.startsWith('/api/v1/'))
+      return require('./node-proxy.cjs')(request, url);
     if (url.host !== 'app' || request.method !== 'GET') return new Response(null, { status: 403 });
     const name = decodeURIComponent(url.pathname);
     const file = path.resolve(root, '.' + (name === '/' ? '/index.html' : name));

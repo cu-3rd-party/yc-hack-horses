@@ -12,7 +12,7 @@ let app, page;
 const errors = [],
   network = [];
 const external = (url) => /^https?:|^wss?:/.test(url);
-async function launch() {
+async function launch(enableDemo = false) {
   const binary = process.env.JOURNAL_BINARY;
   app = await electron.launch({
     executablePath: binary || undefined,
@@ -27,6 +27,13 @@ async function launch() {
     if (external(request.url())) network.push(request.url());
   });
   page.on('websocket', (socket) => network.push(socket.url()));
+  if (enableDemo) {
+    await nav('Настройки');
+    const mode = page.getByRole('switch', { name: 'Демосценарии', exact: true });
+    assert.equal(await mode.getAttribute('aria-checked'), 'false');
+    await mode.click();
+    await nav('Распознавание');
+  }
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   await page.evaluate(() => document.fonts.ready);
 }
@@ -63,7 +70,7 @@ async function match(name, creating = false) {
   await dialog().waitFor({ state: 'hidden' });
 }
 try {
-  await launch();
+  await launch(true);
   assert.equal(await page.title(), 'ЛошID · Полевой журнал');
   await button('ЛошID — распознавание').waitFor();
   await snap('home');
@@ -120,8 +127,11 @@ try {
   await nav('Настройки');
   await page.getByRole('radio', { name: 'Светлая' }).check();
   await page.getByRole('switch', { name: 'Сбой один раз' }).click();
-  await page.waitForFunction(
-    () => document.querySelector('[role=switch]')?.getAttribute('aria-checked') === 'true',
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('[role=switch]')].some(
+      (el) =>
+        el.textContent.includes('Сбой один раз') && el.getAttribute('aria-checked') === 'true',
+    ),
   );
   await nav('Распознавание');
   await page.getByRole('button', { name: /Табун у сопки/ }).click();
@@ -217,10 +227,11 @@ try {
   await nav('Наблюдения');
   await button('Ручная запись').click();
   const horseSelect = page.getByRole('combobox', { name: 'Особь' });
-  const arrowInset = await horseSelect.evaluate((el) =>
-    el.getBoundingClientRect().right -
-    el.querySelector('.select-chevron').getBoundingClientRect().right -
-    parseFloat(getComputedStyle(el).borderRightWidth),
+  const arrowInset = await horseSelect.evaluate(
+    (el) =>
+      el.getBoundingClientRect().right -
+      el.querySelector('.select-chevron').getBoundingClientRect().right -
+      parseFloat(getComputedStyle(el).borderRightWidth),
   );
   assert.equal(arrowInset, 12);
   await horseSelect.click();

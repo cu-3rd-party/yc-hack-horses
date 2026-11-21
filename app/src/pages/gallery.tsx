@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { useHorseHistory } from '../journal/use-journal';
 import { describeTraits, horsePhotos, type Notebook, type Photo } from '../journal/types';
 import { Heading, Back, Modal, Toggle } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
@@ -8,7 +9,9 @@ export function Gallery({ book }: { book: Notebook }) {
     [search, setSearch] = useState('');
   const [active, setActive] = useState<number | null>(null);
   const horse = book.horses.find((h) => h.id === selected);
-  const photos = horse ? horsePhotos(book, horse.id) : [];
+  const history = useHorseHistory(book, horse?.id);
+  const observations = history.data ?? book.observations.filter((o) => o.horseId === horse?.id);
+  const photos = observations.flatMap((o) => o.photos);
   if (horse)
     return (
       <>
@@ -19,9 +22,17 @@ export function Gallery({ book }: { book: Notebook }) {
             'Наблюдения особи · ' + book.observations.filter((o) => o.horseId === horse.id).length
           }
         />
+        {history.isError && (
+          <p role="alert">
+            Не удалось загрузить историю.{' '}
+            <button className="text-link" onClick={() => void history.refetch()}>
+              Повторить
+            </button>
+          </p>
+        )}
         <PhotoGrid photos={photos} onSelect={(photo) => setActive(photos.indexOf(photo))} />
-        {book.observations
-          .filter((o) => o.horseId === horse.id && !o.photos.length)
+        {observations
+          .filter((o) => !o.photos.length)
           .map((o) => (
             <div className="list-row" key={o.id}>
               <strong>{o.name}</strong>

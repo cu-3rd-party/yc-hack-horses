@@ -32,29 +32,42 @@ export async function importImage(file: File): Promise<ImportPhoto> {
     URL.revokeObjectURL(url);
   }
 }
-// Object URLs live only while the component displays that particular photo.
+// Decode originals the browser cannot display using the same native decoder as imports.
+async function nodePreview(source: string, signal: AbortSignal) {
+  if (!window.journalImages) return;
+  const response = await fetch(source, { signal });
+  if (!response.ok) return;
+  const png = await window.journalImages.decode(new Uint8Array(await response.arrayBuffer()));
+  return new Blob([png], { type: 'image/png' });
+}
+
 export function usePhotoURL(source: string) {
+  const [failedSource, setFailedSource] = useState('');
   const [resolved, setResolved] = useState<{ key: string; url: string }>();
+  const stored = source.startsWith('media-');
+  const needsPreview = source.startsWith('/api/v1/blobs/') && source === failedSource;
   useEffect(() => {
-    if (!source.startsWith('media-')) return;
-    let alive = true,
-      url = '';
-    readMedia(source)
-      .then((record) => {
-        if (record && alive) {
-          url = URL.createObjectURL(record.preview);
+    if (!stored && !needsPreview) return;
+    const controller = new AbortController();
+    let url = '';
+    const preview = stored
+      ? readMedia(source).then((record) => record?.preview)
+      : nodePreview(source, controller.signal);
+    preview
+      .then((blob) => {
+        if (blob && !controller.signal.aborted) {
+          url = URL.createObjectURL(blob);
           setResolved({ key: source, url });
         }
       })
       .catch(() => {});
     return () => {
-      alive = false;
+      controller.abort();
       if (url) URL.revokeObjectURL(url);
     };
-  }, [source]);
-  return source.startsWith('media-')
-    ? resolved?.key === source
-      ? resolved.url
-      : undefined
-    : source;
+  }, [source, stored, needsPreview]);
+  return {
+    src: resolved?.key === source ? resolved.url : stored ? undefined : source,
+    onError: () => setFailedSource(source),
+  };
 }

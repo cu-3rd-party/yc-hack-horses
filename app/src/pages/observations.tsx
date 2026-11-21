@@ -143,7 +143,13 @@ export function ObservationLog({
             <dd>{dateLabel(detail.date)}</dd>
             <dt>Особь</dt>
             <dd>{book.horses.find((h) => h.id === detail.horseId)?.name ?? 'Без привязки'}</dd>
-            <dt>Координаты</dt>
+            {detail.observer && (
+              <>
+                <dt>Наблюдатель</dt>
+                <dd>{detail.observer}</dd>
+              </>
+            )}
+            <dt>{book.node ? 'Место наблюдения' : 'Координаты'}</dt>
             <dd>{detail.coordinates || 'Не указаны'}</dd>
             <dt>Признаки</dt>
             <dd>{describeTraits(detail.traits) || 'Не указаны'}</dd>
@@ -160,6 +166,8 @@ export function ObservationLog({
   );
 }
 function Manual({ book, close }: { book: Notebook; close: () => void }) {
+  const live = Boolean(book.node);
+  const [observer, setObserver] = useState('');
   const [name, setName] = useState(''),
     [horse, setHorse] = useState(''),
     [coords, setCoords] = useState('');
@@ -171,20 +179,25 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
   const [busy, setBusy] = useState(false);
   const action = useCommand('/manual'),
     notice = useNotice();
-  const valid =
-    validName(name) &&
-    (!coords || validCoordinates(coords)) &&
-    (files.length > 0 || entries.some((e) => e.value.trim())) &&
-    entries.every((e) => !e.value.trim() || !!e.label.trim()) &&
-    confidence !== '' &&
-    +confidence >= 0 &&
-    +confidence <= 1;
+  const valid = live
+    ? Boolean(observer.trim())
+    : validName(name) &&
+      (!coords || validCoordinates(coords)) &&
+      (files.length > 0 || entries.some((e) => e.value.trim())) &&
+      entries.every((e) => !e.value.trim() || !!e.label.trim()) &&
+      confidence !== '' &&
+      +confidence >= 0 &&
+      +confidence <= 1;
   return (
     <>
       <Back onClick={close}>Назад в журнал</Back>
       <Heading
         title="Ручная запись"
-        description="Зафиксируйте признаки и место встречи с животным."
+        description={
+          live
+            ? 'Сохраните место наблюдения и фотографии на локальной ноде.'
+            : 'Зафиксируйте признаки и место встречи с животным.'
+        }
       />
       <form
         className="panel entry-form"
@@ -195,6 +208,7 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
           try {
             await action.mutateAsync({
               name,
+              observer,
               horseId: horse || null,
               coordinates: coords,
               traits: entries
@@ -217,10 +231,17 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
         }}
       >
         <fieldset disabled={busy}>
-          <label className="field">
-            Название наблюдения
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
-          </label>
+          {live ? (
+            <label className="field">
+              Наблюдатель
+              <input value={observer} onChange={(e) => setObserver(e.target.value)} required />
+            </label>
+          ) : (
+            <label className="field">
+              Название наблюдения
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
+            </label>
+          )}
           <label className="field">
             Особь
             <Select
@@ -243,80 +264,88 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
             />
           </label>
           <label className="field">
-            Координаты
+            {live ? 'Место наблюдения' : 'Координаты'}
             <input
-              placeholder="47.78, 106.01"
+              placeholder={live ? 'Название места или координаты' : '47.78, 106.01'}
               value={coords}
               onChange={(e) => setCoords(e.target.value)}
             />
           </label>
-          {coords && !validCoordinates(coords) && (
-            <p className="field-error">Введите широту и долготу через запятую.</p>
-          )}
-          <button className="text-link" type="button" onClick={() => setCoords('47.78, 106.01')}>
-            <MapPin size={15} />
-            Подставить демокоординаты
-          </button>
-          <fieldset className="manual-traits">
-            <legend>Признаки</legend>
-            {entries.map((entry) => (
-              <div className="trait-entry" key={entry.id}>
-                {(['label', 'value', 'confidence'] as const).map((key, i) => (
-                  <label className="field" key={key}>
-                    {['Название признака', 'Значение признака', 'Уверенность (0–1)'][i]}
-                    <input
-                      type={key === 'confidence' ? 'number' : 'text'}
-                      min={key === 'confidence' ? 0 : undefined}
-                      max={key === 'confidence' ? 1 : undefined}
-                      step={key === 'confidence' ? 0.01 : undefined}
-                      value={entry[key]}
-                      onChange={(e) =>
-                        setEntries((current) =>
-                          current.map((item) =>
-                            item.id === entry.id ? { ...item, [key]: e.target.value } : item,
-                          ),
-                        )
+          {!live && (
+            <>
+              {coords && !validCoordinates(coords) && (
+                <p className="field-error">Введите широту и долготу через запятую.</p>
+              )}
+              <button
+                className="text-link"
+                type="button"
+                onClick={() => setCoords('47.78, 106.01')}
+              >
+                <MapPin size={15} />
+                Подставить демокоординаты
+              </button>
+              <fieldset className="manual-traits">
+                <legend>Признаки</legend>
+                {entries.map((entry) => (
+                  <div className="trait-entry" key={entry.id}>
+                    {(['label', 'value', 'confidence'] as const).map((key, i) => (
+                      <label className="field" key={key}>
+                        {['Название признака', 'Значение признака', 'Уверенность (0–1)'][i]}
+                        <input
+                          type={key === 'confidence' ? 'number' : 'text'}
+                          min={key === 'confidence' ? 0 : undefined}
+                          max={key === 'confidence' ? 1 : undefined}
+                          step={key === 'confidence' ? 0.01 : undefined}
+                          value={entry[key]}
+                          onChange={(e) =>
+                            setEntries((current) =>
+                              current.map((item) =>
+                                item.id === entry.id ? { ...item, [key]: e.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    ))}
+                    <button
+                      type="button"
+                      className="text-link"
+                      aria-label="Удалить признак"
+                      onClick={() =>
+                        setEntries((current) => current.filter((item) => item.id !== entry.id))
                       }
-                    />
-                  </label>
+                    >
+                      ×
+                    </button>
+                  </div>
                 ))}
                 <button
-                  type="button"
                   className="text-link"
-                  aria-label="Удалить признак"
+                  type="button"
                   onClick={() =>
-                    setEntries((current) => current.filter((item) => item.id !== entry.id))
+                    setEntries((current) => [
+                      ...current,
+                      { id: crypto.randomUUID(), label: '', value: '', confidence: '' },
+                    ])
                   }
                 >
-                  ×
+                  <Plus size={15} />
+                  Добавить признак
                 </button>
-              </div>
-            ))}
-            <button
-              className="text-link"
-              type="button"
-              onClick={() =>
-                setEntries((current) => [
-                  ...current,
-                  { id: crypto.randomUUID(), label: '', value: '', confidence: '' },
-                ])
-              }
-            >
-              <Plus size={15} />
-              Добавить признак
-            </button>
-          </fieldset>
-          <label className="field">
-            Достоверность (0–1)
-            <input
-              type="number"
-              min="0"
-              max="1"
-              step="0.01"
-              value={confidence}
-              onChange={(e) => setConfidence(e.target.value)}
-            />
-          </label>
+              </fieldset>
+              <label className="field">
+                Достоверность (0–1)
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={confidence}
+                  onChange={(e) => setConfidence(e.target.value)}
+                />
+              </label>
+            </>
+          )}
           <div className="dialog-actions">
             <Button size="lg" type="button" variant="outline" onClick={close}>
               Отменить

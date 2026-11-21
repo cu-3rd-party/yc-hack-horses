@@ -1,7 +1,7 @@
 export type Point = [number, number];
 export interface Annotation {
   outline: Point[];
-  traits: { label: string; value: string; at: Point }[];
+  traits: { label: string; value: string; at?: Point; polygon?: Point[] }[];
 }
 export interface Photo {
   id: string;
@@ -9,6 +9,7 @@ export interface Photo {
   source: string; // Bundled URL or IndexedDB media key.
   angle: string;
   framing: string;
+  quality?: string;
   annotation: Annotation;
 }
 export interface Horse {
@@ -38,6 +39,7 @@ export interface Observation {
   date: string;
   photos: Photo[];
   coordinates: string;
+  observer?: string;
   traits: TraitReading[];
   confidence?: number;
 }
@@ -45,7 +47,8 @@ export interface Detection {
   id: string;
   number: number;
   annotation: Annotation;
-  candidates: { horseId: string; score: number }[];
+  confidence?: number;
+  candidates: { horseId: string; score: number; name?: string; bestPhotoId?: string }[];
 }
 export interface Review {
   id: string;
@@ -53,7 +56,24 @@ export interface Review {
   detections: Detection[];
   illustrative: boolean;
 }
+export interface NodeInfo {
+  node_id: string;
+  app_version: string;
+  role_hint: string;
+  driver: string;
+  event_count: number;
+  sync?:
+    | {
+        addr: string;
+        events_sent: number;
+        events_received: number;
+        last_sync_at?: string;
+        last_error?: string;
+      }[]
+    | null;
+}
 export interface Notebook {
+  node?: NodeInfo;
   horses: Horse[];
   observations: Observation[];
   review: Review | null;
@@ -79,6 +99,7 @@ export interface Decision {
   name: string;
 }
 export interface ManualInput {
+  observer?: string;
   name: string;
   horseId: string | null;
   coordinates: string;

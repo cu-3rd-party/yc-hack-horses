@@ -15,8 +15,8 @@ export function Thumbnail({
   alt?: string;
   className?: string;
 }) {
-  const src = usePhotoURL(photo.source);
-  return <img src={src} alt={alt} className={className} draggable={false} />;
+  const { src, onError } = usePhotoURL(photo.source);
+  return <img src={src} onError={onError} alt={alt} className={className} draggable={false} />;
 }
 export function MarkedPhoto({
   photo,
@@ -31,7 +31,7 @@ export function MarkedPhoto({
   highlight?: boolean;
   onClick?: () => void;
 }) {
-  const src = usePhotoURL(photo.source);
+  const { src, onError } = usePhotoURL(photo.source);
   const box = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState([0, 0]);
   const [dimensions, setDimensions] = useState({ url: '', w: 0, h: 0 });
@@ -61,6 +61,7 @@ export function MarkedPhoto({
     <>
       <img
         src={src}
+        onError={onError}
         alt={traits && labels.length ? photo.name + '. ' + labels.join(', ') : photo.name}
         onLoad={(e) =>
           setDimensions({
@@ -70,6 +71,11 @@ export function MarkedPhoto({
           })
         }
       />
+      {traits && annotation.traits.some((t) => !t.at) && (
+        <span className="unlocated-traits">
+          {annotation.traits.flatMap((t, i) => (t.at ? [] : [labels[i]])).join(' · ')}
+        </span>
+      )}
       {(traits || highlight) && width > 0 && dimensions.url === src && (
         <div className="marks" aria-hidden="true">
           <Stage width={width} height={height} listening={false}>
@@ -87,6 +93,19 @@ export function MarkedPhoto({
                   lineJoin="round"
                 />
               )}
+              {traits &&
+                annotation.traits.map(({ polygon, label }, i) =>
+                  polygon?.length ? (
+                    <Line
+                      key={label + i}
+                      points={polygon.flatMap(([x, y]) => [dx + x * w, dy + y * h])}
+                      closed
+                      stroke="white"
+                      strokeWidth={1.5}
+                      fill="rgba(255,255,255,0.14)"
+                    />
+                  ) : null,
+                )}
               {marks.map(({ label, px, py, tx, ty, width }) => (
                 <Line
                   key={label}
@@ -165,7 +184,7 @@ function placeTraitLabels(
   const placed: TraitMark[] = [];
   textMeasure.font = '11px Inter';
   const points = annotation.traits
-    .map((trait, i) => ({ at: trait.at, label: labels[i]! }))
+    .flatMap((trait, i) => (trait.at ? [{ at: trait.at, label: labels[i]! }] : []))
     .sort((a, b) => a.at[1] - b.at[1]);
   for (const {
     at: [x, y],

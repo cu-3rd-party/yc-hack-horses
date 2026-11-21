@@ -12,6 +12,7 @@ import {
   ScanLine,
   Settings2,
 } from 'lucide-react';
+import { useDemo } from '../journal/mode';
 import { useNotebook } from '../journal/use-journal';
 import { ReviewPage } from '../pages/review';
 import { Gallery } from '../pages/gallery';
@@ -38,8 +39,20 @@ const sections = [
 ] as const;
 type Route = (typeof sections)[number]['items'][number]['key'];
 export default function App() {
-  const [route, setRoute] = useState<Route>('review'),
-    [help, setHelp] = useState(false),
+  const demo = useDemo();
+  const [route, setRoute] = useState<Route>('review');
+  return <Workspace key={String(demo)} demo={demo} route={route} setRoute={setRoute} />;
+}
+function Workspace({
+  demo,
+  route,
+  setRoute,
+}: {
+  demo: boolean;
+  route: Route;
+  setRoute: (route: Route) => void;
+}) {
+  const [help, setHelp] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [processing, setProcessing] = useState(false),
     [logId, setLogId] = useState<string | undefined>();
@@ -107,9 +120,11 @@ export default function App() {
       </aside>
       <main className="work" ref={main}>
         <div className="content">
-          {error ? (
+          {route === 'settings' ? (
+            <Settings book={book} />
+          ) : error ? (
             <div className="empty" role="alert">
-              Не удалось открыть журнал.{' '}
+              {error.message || 'Не удалось открыть журнал.'}{' '}
               <button className="text-link" onClick={() => void refetch()}>
                 Повторить
               </button>
@@ -140,7 +155,6 @@ export default function App() {
               )}
               {route === 'dashboard' && <Dashboard book={book} />}
               {route === 'sync' && <Sync book={book} />}
-              {route === 'settings' && <Settings book={book} />}
             </>
           )}
         </div>
@@ -148,7 +162,9 @@ export default function App() {
       {help && (
         <Modal title="Как пользоваться журналом" onClose={() => setHelp(false)}>
           <ol className="guide">
-            <li>Выберите пример или загрузите полевой снимок.</li>
+            <li>
+              {demo ? 'Выберите пример или загрузите полевой снимок.' : 'Загрузите полевой снимок.'}
+            </li>
             <li>
               Сравните каждую лошадь с кандидатами. Нажмите на фото справа, чтобы выбрать другой
               ракурс.
@@ -159,8 +175,9 @@ export default function App() {
             </li>
           </ol>
           <p className="dialog-description">
-            Данные и фотографии хранятся на этом устройстве. Распознавание и обмен с узлом
-            смоделированы.
+            {demo
+              ? 'Деможурнал хранится на этом устройстве. Распознавание и обмен с узлом смоделированы.'
+              : 'Рабочий журнал и фотографии хранятся на локальной ноде.'}
           </p>
         </Modal>
       )}

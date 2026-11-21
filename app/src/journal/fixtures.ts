@@ -475,7 +475,7 @@ const demoQuality = new Map([
   ]),
 ]);
 export function photoQuality(photo: Photo) {
-  return demoQuality.get(photo.source) ?? 'Без оценки';
+  return photo.quality ?? demoQuality.get(photo.source) ?? 'Без оценки';
 }
 
 export function samplePhoto(key: 'single' | 'pair'): Photo {

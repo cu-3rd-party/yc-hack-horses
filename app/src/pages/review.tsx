@@ -18,7 +18,7 @@ import {
   type Review,
 } from '../journal/types';
 import { importImage } from '../journal/media';
-import { useCommand } from '../journal/use-journal';
+import { useCommand, useHorseHistory } from '../journal/use-journal';
 import { Heading, Modal, Pager, Toggle, useNotice } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
@@ -43,16 +43,19 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
   const [drag, setDrag] = useState(false);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
+  const [emptyResult, setEmptyResult] = useState(false);
   const analyze = useCommand('/analysis');
   async function begin(name: string, input: () => Promise<AnalysisInput>) {
     if (locked.current) return;
     locked.current = true;
     setFileName(name);
     setError('');
+    setEmptyResult(false);
     setLoading(true);
     onBusyChange(true);
     try {
-      await analyze.mutateAsync(await input());
+      const result = await analyze.mutateAsync(await input());
+      setEmptyResult(result?.detections.length === 0);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -124,6 +127,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
               )}
             </span>
           </button>
+          {emptyResult && <p role="status">На снимке не обнаружено лошадей.</p>}
           {fileName && (
             <div className="file-state" role="status">
               <FileImage size={17} />
@@ -165,35 +169,37 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
           </div>
         </section>
       </div>
-      <section className="home-section">
-        <div className="section-heading">
-          <h2>Примеры для распознавания</h2>
-        </div>
-        <div className="sample-grid">
-          {(['single', 'pair'] as const).map((key, i) => {
-            const photo = samplePhoto(key);
-            return (
-              <button
-                key={key}
-                className="sample-card"
-                disabled={loading}
-                onClick={() => void begin(photo.name, async () => ({ sample: key }))}
-              >
-                <div className="sample-art">
-                  <Thumbnail photo={photo} />
-                </div>
-                <div className="sample-info">
-                  <div>
-                    <strong>{i ? 'Табун у сопки' : 'На выпасе'}</strong>
-                    <small>{i ? 'Две лошади' : 'Одна лошадь'}</small>
+      {!book.node && (
+        <section className="home-section">
+          <div className="section-heading">
+            <h2>Примеры для распознавания</h2>
+          </div>
+          <div className="sample-grid">
+            {(['single', 'pair'] as const).map((key, i) => {
+              const photo = samplePhoto(key);
+              return (
+                <button
+                  key={key}
+                  className="sample-card"
+                  disabled={loading}
+                  onClick={() => void begin(photo.name, async () => ({ sample: key }))}
+                >
+                  <div className="sample-art">
+                    <Thumbnail photo={photo} />
                   </div>
-                  <ArrowRight size={18} strokeWidth={1.6} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+                  <div className="sample-info">
+                    <div>
+                      <strong>{i ? 'Табун у сопки' : 'На выпасе'}</strong>
+                      <small>{i ? 'Две лошади' : 'Одна лошадь'}</small>
+                    </div>
+                    <ArrowRight size={18} strokeWidth={1.6} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </>
   );
 }
@@ -203,13 +209,24 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
     review.detections.find((d) => d.number >= ordinal) ??
     review.detections[review.detections.length - 1]!;
   const index = review.detections.indexOf(detection);
-  const [choices, setChoices] = useState<Record<string, { id: string; photo: number }>>({});
-  const candidateId = choices[detection.id]?.id ?? detection.candidates[0]!.horseId;
-  const photos = horsePhotos(book, candidateId),
-    photoIndex = choices[detection.id]?.photo ?? 0;
-  const candidate = book.horses.find((h) => h.id === candidateId)!;
-  const right = photos[photoIndex] ?? photos[0]!;
-  function select(id: string, photo: number) {
+  const [choices, setChoices] = useState<Record<string, { id: string; photo?: number }>>({});
+  const choice = choices[detection.id];
+  const candidateId = choice?.id ?? detection.candidates[0]?.horseId;
+  const ranked = detection.candidates.find((c) => c.horseId === candidateId);
+  const history = useHorseHistory(book, candidateId);
+  const photos = book.node
+    ? (history.data?.flatMap((o) => o.photos) ?? [])
+    : horsePhotos(book, candidateId ?? '');
+  const preferred = ranked?.bestPhotoId;
+  const photoIndex =
+    choice?.photo ??
+    Math.max(
+      0,
+      photos.findIndex((p) => p.id === preferred),
+    );
+  const candidateName = ranked?.name ?? book.horses.find((h) => h.id === candidateId)?.name;
+  const right = photos[photoIndex] ?? photos[0];
+  function select(id: string, photo?: number) {
     setChoices((old) => ({ ...old, [detection.id]: { id, photo } }));
   }
   const [traits, setTraits] = useState(true),
@@ -239,14 +256,14 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
       await resolve.mutateAsync({
         reviewId: review.id,
         detectionId: detection.id,
-        horseId: modal === 'new' ? null : candidateId,
+        horseId: modal === 'new' ? null : candidateId!,
         name: filename,
         horseName: modal === 'new' ? horseName : undefined,
       });
       notice(
         modal === 'new'
           ? 'Новая особь добавлена в галерею.'
-          : 'Наблюдение добавлено к особи «' + candidate.name + '».',
+          : 'Наблюдение добавлено к особи «' + candidateName + '».',
       );
     } catch (error) {
       notice((error as Error).message, true);
@@ -280,7 +297,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
             <UserRoundPlus size={16} />
             Нет подходящих
           </Button>
-          <Button size="lg" onClick={() => setModal('match')}>
+          <Button size="lg" disabled={!candidateId} onClick={() => setModal('match')}>
             <Check size={16} />
             Зафиксировать результат
           </Button>
@@ -311,50 +328,75 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
           </footer>
         </article>
         <article className="compare-card">
-          <header>
-            <span className="eyelabel">Фото из каталога · {candidate.name}</span>
-            <h2>{right.name}</h2>
-          </header>
-          <MarkedPhoto photo={right} traits={traits} onClick={() => setModal('pick')} />
-          <footer>
-            <button className="text-link" onClick={() => setModal('pick')}>
-              <Images size={15} />
-              Все фото особи
-            </button>
-            <Pager
-              index={photoIndex}
-              total={photos.length}
-              label="Фото"
-              onChange={(i) => select(candidateId, i)}
-            />
-          </footer>
+          {right && candidateId ? (
+            <>
+              <header>
+                <span className="eyelabel">Фото из каталога · {candidateName}</span>
+                <h2>{right.name}</h2>
+              </header>
+              <MarkedPhoto photo={right} traits={traits} onClick={() => setModal('pick')} />
+              <footer>
+                <button className="text-link" onClick={() => setModal('pick')}>
+                  <Images size={15} />
+                  Все фото особи
+                </button>
+                <Pager
+                  index={photoIndex}
+                  total={photos.length}
+                  label="Фото"
+                  onChange={(i) => select(candidateId, i)}
+                />
+              </footer>
+            </>
+          ) : (
+            <p className="empty" role="status">
+              {!candidateId ? (
+                'Подходящих особей не найдено.'
+              ) : history.isError ? (
+                <>
+                  Не удалось загрузить фотографии.{' '}
+                  <button className="text-link" onClick={() => void history.refetch()}>
+                    Повторить
+                  </button>
+                </>
+              ) : history.isFetching ? (
+                'Загружаем фотографии…'
+              ) : (
+                'У особи нет фотографий.'
+              )}
+            </p>
+          )}
         </article>
       </div>
       <section className="home-section">
         <div className="section-heading">
-          <h2>Вероятные кандидаты</h2>
+          <h2>{book.node ? 'Кандидаты по сходству' : 'Вероятные кандидаты'}</h2>
           <small>{detection.candidates.length}</small>
         </div>
         <div className="candidate-grid">
           {detection.candidates.map((c) => {
-            const horse = book.horses.find((h) => h.id === c.horseId)!;
+            const preview = horsePhotos(book, c.horseId);
+            const thumb = preview.find((p) => p.id === c.bestPhotoId) ?? preview[0];
+            const name = c.name ?? book.horses.find((h) => h.id === c.horseId)?.name ?? c.horseId;
+            const percent = book.node ? Math.round(c.score * 100) : c.score;
+            const bar = Math.min(100, Math.max(0, percent));
             return (
               <button
-                key={horse.id}
-                aria-pressed={candidateId === horse.id}
-                className={'candidate' + (candidateId === horse.id ? ' selected' : '')}
-                onClick={() => select(horse.id, 0)}
+                key={c.horseId}
+                aria-pressed={candidateId === c.horseId}
+                className={'candidate' + (candidateId === c.horseId ? ' selected' : '')}
+                onClick={() => select(c.horseId)}
               >
-                <Thumbnail photo={horsePhotos(book, horse.id)[0]!} />
+                {thumb ? <Thumbnail photo={thumb} /> : <FileImage size={22} />}
                 <span>
-                  <strong>{horse.name}</strong>
-                  <b>{c.score}%</b>
+                  <strong>{name}</strong>
+                  <b>{percent}%</b>
                   <i>
                     <em
                       style={{
-                        width: c.score + '%',
+                        width: bar + '%',
                         backgroundColor:
-                          'color-mix(in oklab, var(--muted), var(--score) ' + c.score + '%)',
+                          'color-mix(in oklab, var(--muted), var(--score) ' + bar + '%)',
                       }}
                     />
                   </i>
@@ -364,8 +406,8 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
           })}
         </div>
       </section>
-      {modal === 'pick' && (
-        <Modal wide title={'Фотографии · ' + candidate.name} onClose={() => setModal(null)}>
+      {modal === 'pick' && candidateId && (
+        <Modal wide title={'Фотографии · ' + candidateName} onClose={() => setModal(null)}>
           <PhotoGrid
             photos={photos}
             onSelect={(p) => {
@@ -407,7 +449,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
               ? 'Наблюдение ' +
                 detection.number +
                 ' будет добавлено к наблюдениям лошади «' +
-                candidate.name +
+                candidateName +
                 '».'
               : 'Наблюдение ' +
                 detection.number +

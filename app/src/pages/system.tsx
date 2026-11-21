@@ -1,3 +1,4 @@
+import { setDemo, useDemo } from '../journal/mode';
 import { version } from '../../package.json';
 import { useState } from 'react';
 import { Activity, Database, Images, ListChecks, RefreshCw, RotateCcw } from 'lucide-react';
@@ -24,6 +25,22 @@ function Facts({ rows }: { rows: [string, string | number][] }) {
   );
 }
 export function Dashboard({ book }: { book: Notebook }) {
+  if (book.node)
+    return (
+      <>
+        <Heading title="Сводка" description="Локальный полевой журнал" />
+        <section className="panel">
+          <Facts
+            rows={[
+              ['Особи', book.horses.length],
+              ['Наблюдения', book.observations.length],
+              ['Локальный узел', book.node.node_id],
+              ['События', book.node.event_count],
+            ]}
+          />
+        </section>
+      </>
+    );
   return (
     <>
       <Heading title="Сводка" description="Состояние локального журнала и обмена наблюдениями." />
@@ -61,6 +78,37 @@ export function Sync({ book }: { book: Notebook }) {
   const sync = useCommand('/sync'),
     pref = useCommand('/preferences'),
     notice = useNotice();
+  if (book.node)
+    return (
+      <>
+        <Heading title="Синхронизация" description="Состояние обмена по данным локальной ноды." />
+        <section className="panel">
+          <h2>Узлы обмена</h2>
+          {book.node.sync?.length ? (
+            book.node.sync.map((peer) => (
+              <div key={peer.addr}>
+                <h3>{peer.addr}</h3>
+                <Facts
+                  rows={[
+                    ['Отправлено событий', peer.events_sent],
+                    ['Получено событий', peer.events_received],
+                    [
+                      'Последний обмен',
+                      stamp(
+                        peer.last_sync_at?.startsWith('0001') ? null : (peer.last_sync_at ?? null),
+                      ),
+                    ],
+                    ...(peer.last_error ? [['Ошибка', peer.last_error] as [string, string]] : []),
+                  ]}
+                />
+              </div>
+            ))
+          ) : (
+            <p className="empty">Нода не сообщила об узлах обмена.</p>
+          )}
+        </section>
+      </>
+    );
   return (
     <>
       <Heading
@@ -118,7 +166,8 @@ export function Sync({ book }: { book: Notebook }) {
     </>
   );
 }
-export function Settings({ book }: { book: Notebook }) {
+export function Settings({ book }: { book?: Notebook }) {
+  const demo = useDemo();
   const [theme, setTheme] = useState(initialScheme);
   const [reset, setReset] = useState(false),
     pref = useCommand('/preferences'),
@@ -126,10 +175,7 @@ export function Settings({ book }: { book: Notebook }) {
     notice = useNotice();
   return (
     <>
-      <Heading
-        title="Настройки"
-        description="Локальное хранилище и управление демонстрационными данными."
-      />
+      <Heading title="Настройки" description="Источник данных и оформление журнала." />
       <fieldset className="scheme-panel">
         <legend>Цветовая схема</legend>
         <div className="schemes">
@@ -152,46 +198,70 @@ export function Settings({ book }: { book: Notebook }) {
         </div>
       </fieldset>
       <section className="panel">
-        <h2>Рабочее пространство</h2>
-        <Facts
-          rows={[
-            ['Профиль', 'Полевой наблюдатель'],
-            ['Локальный узел', 'TAKHI-FIELD-01'],
-            ['Хранилище', 'IndexedDB · на этом устройстве'],
-            ['Объём импортированных снимков', formatBytes(book.mediaBytes ?? 0)],
-            ['Сертификат', 'Демонстрационный · доверенный'],
-            ['Субъект сертификата', 'TAKHI-FIELD-01 · Demo CA'],
-            ['Срок сертификата', '31 декабря 2028 г.'],
-            ['Версия приложения', version],
-          ]}
-        />
-      </section>
-      <section className="panel">
-        <h2>Демонстрационные сценарии</h2>
+        <h2>Источник данных</h2>
         <div className="setting">
-          <div>
-            <strong>Ошибка сохранения</strong>
-            <p>Одна следующая попытка завершится ошибкой. Повторная попытка сохранит запись.</p>
-          </div>
-          <Toggle
-            on={book.failNextSave}
-            disabled={pref.isPending}
-            label="Сбой один раз"
-            onChange={() => pref.mutate({ failNextSave: !book.failNextSave })}
-          />
-        </div>
-        <div className="setting">
-          <div>
-            <strong>Исходные данные</strong>
-            <p>Восстановить примеры, удалить добавленные снимки и очистить очередь.</p>
-          </div>
-          <Button variant="outline" onClick={() => setReset(true)}>
-            <RotateCcw size={15} />
-            Сбросить демо
-          </Button>
+          <p>{demo ? 'Примеры и записи на этом устройстве' : 'Локальная нода · 127.0.0.1:8080'}</p>
+          <Toggle label="Демосценарии" on={demo} onChange={() => setDemo(!demo)} />
         </div>
       </section>
-      {reset && (
+      {demo && book ? (
+        <>
+          <section className="panel">
+            <h2>Рабочее пространство</h2>
+            <Facts
+              rows={[
+                ['Профиль', 'Полевой наблюдатель'],
+                ['Локальный узел', 'TAKHI-FIELD-01'],
+                ['Хранилище', 'IndexedDB · на этом устройстве'],
+                ['Объём импортированных снимков', formatBytes(book.mediaBytes ?? 0)],
+                ['Сертификат', 'Демонстрационный · доверенный'],
+                ['Субъект сертификата', 'TAKHI-FIELD-01 · Demo CA'],
+                ['Срок сертификата', '31 декабря 2028 г.'],
+                ['Версия приложения', version],
+              ]}
+            />
+          </section>
+          <section className="panel">
+            <h2>Демонстрационные сценарии</h2>
+            <div className="setting">
+              <div>
+                <strong>Ошибка сохранения</strong>
+                <p>Одна следующая попытка завершится ошибкой. Повторная попытка сохранит запись.</p>
+              </div>
+              <Toggle
+                on={book.failNextSave}
+                disabled={pref.isPending}
+                label="Сбой один раз"
+                onChange={() => pref.mutate({ failNextSave: !book.failNextSave })}
+              />
+            </div>
+            <div className="setting">
+              <div>
+                <strong>Исходные данные</strong>
+                <p>Восстановить примеры, удалить добавленные снимки и очистить очередь.</p>
+              </div>
+              <Button variant="outline" onClick={() => setReset(true)}>
+                <RotateCcw size={15} />
+                Сбросить демо
+              </Button>
+            </div>
+          </section>
+        </>
+      ) : (
+        !demo && (
+          <section className="panel">
+            <h2>Рабочее пространство</h2>
+            <Facts
+              rows={[
+                ['Локальный узел', book?.node?.node_id ?? 'Нет соединения'],
+                ['Хранилище', book?.node?.driver ?? '—'],
+                ['Версия приложения', version],
+              ]}
+            />
+          </section>
+        )
+      )}
+      {reset && demo && (
         <Modal
           title="Восстановить исходные данные?"
           description="Ваши локальные снимки и решения будут удалены. В журнале останутся только исходные примеры."

@@ -1368,3 +1368,16 @@ option:checked > .option-check {
     transition-duration: 0.001ms !important;
   }
 }
+
+.unlocated-traits {
+  position: absolute;
+  z-index: 1;
+  bottom: 8px;
+  left: 8px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: #222;
+  color: white;
+  font-size: 12px;
+  pointer-events: none;
+}
