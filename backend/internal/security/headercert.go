@@ -15,6 +15,7 @@ package security
 
 import (
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -39,7 +40,18 @@ func ParseClientCertHeader(header string) (*x509.Certificate, error) {
 	}
 	block, _ := pem.Decode([]byte(raw))
 	if block == nil || block.Type != "CERTIFICATE" {
-		return nil, fmt.Errorf("security: %s: не PEM CERTIFICATE", ClientCertHeaderName)
+		// Traefik может прислать PEM без переносов строк (base64 DER в одну
+		// строку) — пытаемся декодировать и это.
+		compact := strings.NewReplacer("\\n", "", "\r", "").Replace(raw)
+		der, b64err := base64.StdEncoding.DecodeString(compact)
+		if b64err != nil {
+			return nil, fmt.Errorf("security: %s: не PEM/base64 CERTIFICATE", ClientCertHeaderName)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, fmt.Errorf("security: %s: разбор сертификата: %w", ClientCertHeaderName, err)
+		}
+		return cert, nil
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
