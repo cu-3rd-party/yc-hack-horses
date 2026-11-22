@@ -195,7 +195,9 @@ jobs:
             -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":true}" \
             | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("id",""))')
           if [ -z "$rid" ]; then echo 'не удалось создать релиз' >&2; exit 1; fi
-          find artifacts -type f | while read -r f; do
+          # Только финальные артефакты: tar.gz/rpm/apk/deb/AppImage. find по всем
+          # файлам тащит распакованные внутренности бандлов (bcmap/wasm дистрибутивов).
+          find artifacts -type f | grep -E '\.(tar\.gz|rpm|apk|deb|AppImage)$' | while read -r f; do
             name=$(basename "$f")
             curl -sS -H "Authorization: token ${RELEASE_TOKEN}" -X POST \
               "https://git.cu3rd.ru/api/v1/repos/$REPO/releases/$rid/assets?name=$name" \
