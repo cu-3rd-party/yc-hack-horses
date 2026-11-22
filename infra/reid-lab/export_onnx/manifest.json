@@ -1,0 +1,58 @@
+{
+  "description": "ONNX-артефакты для Go-бэкенда ReID (модуль M1). Бинарники лежат ВНЕ git в /root/k8s/src/models/reid-lab/ (env REID_MODELS_DIR). Здесь только скрипты экспорта и манифест воспроизводимости.",
+  "python": "3.12.11",
+  "versions": {
+    "torch": "2.15.0+cpu",
+    "timm": "1.0.31",
+    "transformers": "5.24.0",
+    "ultralytics": "8.4.216",
+    "onnx": "1.23.2",
+    "onnxruntime": "1.32.0",
+    "numpy": "2.5.4",
+    "safetensors": "0.8.0"
+  },
+  "setup": [
+    "/usr/bin/python3.12 -m venv .venv",
+    "taskset -c 0-3 .venv/bin/python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu",
+    "taskset -c 0-3 .venv/bin/python -m pip install timm transformers ultralytics onnx onnxruntime safetensors scipy onnxscript"
+  ],
+  "artifacts": [
+    {
+      "name": "yolo11s.onnx",
+      "path": "/root/k8s/src/models/reid-lab/yolo11s.onnx",
+      "size": 38051784,
+      "sha256": "d34db73ed794a4e39f2fe7a768a8e4891eeaf270cd431e6c16a8c55375aaed61",
+      "source": "ultralytics yolo11s.pt (COCO)",
+      "opset": 18,
+      "input": {"name": "images", "shape": [1, 3, 640, 640], "dtype": "float32", "note": "RGB 0..1 после letterbox 640"},
+      "output": {"name": "output0", "shape": [1, 84, 8400], "dtype": "float32", "note": "без NMS: 4 box + 80 классов"},
+      "export_command": "taskset -c 0-3 .venv/bin/python export_onnx/export_yolo11s.py",
+      "verify": {"method": "onnxruntime vs nn.Module ultralytics (net(x)[0], x=rand 640x640)", "max_abs_diff": 8.24e-4}
+    },
+    {
+      "name": "dinov2-b14-224.onnx",
+      "path": "/root/k8s/src/models/reid-lab/dinov2-b14-224.onnx",
+      "size": 343032939,
+      "sha256": "77229c4745536ef3ee85986585c7acddf6809a43c15755cc32e956bd6c602cc1",
+      "source": "timm vit_base_patch14_dinov2.lvd142m (pretrained, num_classes=0, img_size=224)",
+      "opset": 17,
+      "input": {"name": "pixel_values", "shape": ["b", 3, 224, 224], "dtype": "float32", "note": "resize 224x224 BICUBIC БЕЗ кропа, ImageNet mean (.485,.456,.406) std (.229,.224,.225)"},
+      "output": {"name": "embedding", "shape": ["b", 768], "dtype": "float32", "note": "CLS после финальной norm, без L2"},
+      "export_command": "taskset -c 0-3 .venv/bin/python export_onnx/export_dinov2.py",
+      "verify": {"method": "onnxruntime vs прямой timm-прогон (x=rand 2x3x224x224)", "max_abs_diff": 1.25e-5}
+    },
+    {
+      "name": "vitpose-plus-base-256x192.onnx",
+      "path": "/root/k8s/src/models/reid-lab/vitpose-plus-base-256x192.onnx",
+      "size": 501965660,
+      "sha256": "bbb7b9a60bcb23eb1c86dab120c880af2aaa1e7b18afb64a3d8cf109af31d6a9",
+      "source": "HF usyd-community/vitpose-plus-base (dataset_index=3/AP-10K зафиксирован внутри графа)",
+      "opset": 17,
+      "input": {"name": "pixel_values", "shape": ["b", 3, 256, 192], "dtype": "float32", "note": "аффинный кроп box→256x192 (box_to_center_and_scale+get_warp_matrix), ImageNet mean/std"},
+      "output": {"name": "heatmaps", "shape": ["b", 17, 64, 48], "dtype": "float32", "note": "СЫРЫЕ тепмапы без sigmoid; декод см. докстринг export_vitpose.py"},
+      "export_command": "taskset -c 0-3 .venv/bin/python export_onnx/export_vitpose.py",
+      "verify": {"method": "onnxruntime vs прямой прогон обёрнутой torch-модели (x=rand 1x3x256x192); плюс динамический batch=2", "max_abs_diff": 5.89e-7}
+    }
+  ],
+  "port_criterion": "векторы Go и Python (demo_app.py) должны совпадать с cos > 0.999 на test_photos; top-3 по кличкам должны совпадать"
+}
