@@ -21,6 +21,16 @@ export interface HorseMetadata {
   birth_year?: number | null;
   color?: string;
   notes?: string;
+  /** Номер по племенной книге. */
+  studbook_number?: string;
+  /**
+   * PDF-паспорт: загрузка PUT /api/v1/horses/{id}/passport (multipart: file, studbook_number),
+   * просмотр GET /api/v1/horses/{id}/passport. Поля заполняет нода, не клиент.
+   */
+  passport_sha256?: string;
+  passport_filename?: string;
+  passport_size?: string;
+  passport_attached_at?: ISO8601;
   [key: string]: unknown;
 }
 

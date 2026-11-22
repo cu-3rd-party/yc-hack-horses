@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -79,6 +80,8 @@ func applyProjections(ctx context.Context, tx *sqlstore.Store, events []domain.E
 			err = projectObservationAdded(ctx, tx, ev)
 		case domain.EventBlobRegistered:
 			err = projectBlobRegistered(ctx, tx, ev)
+		case domain.EventHorsePassportAttached:
+			err = projectPassportAttached(ctx, tx, ev)
 		case domain.EventBlobDeleted:
 			var (
 				sha string
@@ -141,6 +144,34 @@ func projectObservationAdded(ctx context.Context, tx *sqlstore.Store, ev domain.
 	}
 	if _, err := tx.InvalidateObservationIfBlobsDeleted(ctx, o.ID, refs, "blob deleted"); err != nil {
 		return fmt.Errorf("invalidate observation: %w", err)
+	}
+	return nil
+}
+
+// projectPassportAttached: побеждает последний по времени паспорт, поэтому
+// повторная или запоздавшая доставка ничего не портит. Если лошадь ещё не
+// доехала (её создала другая нода), событие пропускается, а не блокирует синк.
+func projectPassportAttached(ctx context.Context, tx *sqlstore.Store, ev domain.Event) error {
+	var p domain.PassportAttached
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return fmt.Errorf("decode passport payload: %w", err)
+	}
+	if p.HorseID == "" {
+		p.HorseID = ev.AggregateID
+	}
+	h, err := tx.GetHorse(ctx, p.HorseID)
+	if errors.Is(err, storage.ErrNotFound) {
+		slog.Warn("passport for unknown horse skipped", "horse_id", p.HorseID, "event_id", ev.EventID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get horse: %w", err)
+	}
+	if p.SupersededBy(h.Metadata) {
+		return nil
+	}
+	if _, err := tx.UpdateHorse(ctx, p.HorseID, nil, p.Metadata()); err != nil {
+		return fmt.Errorf("update horse passport: %w", err)
 	}
 	return nil
 }

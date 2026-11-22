@@ -207,8 +207,8 @@ func (s *Store) listObservations(ctx context.Context, horseID string, limited bo
 	return out, rows.Err()
 }
 
-// ListReferencedBlobHashes возвращает уникальные blob_ids из всех наблюдений —
-// датасет, на который ссылается эта нода. Список может быть больше, чем блобов
+// ListReferencedBlobHashes возвращает уникальные blob_ids из всех наблюдений и
+// sha256 PDF-паспортов лошадей — датасет, на который ссылается эта нода. Список может быть больше, чем блобов
 // на диске: часть файлов ещё не доехала (неполный синк), поэтому его нельзя
 // использовать как источник для отправки, только как список потребностей.
 func (s *Store) ListReferencedBlobHashes(ctx context.Context) ([]string, error) {
@@ -237,6 +237,19 @@ func (s *Store) ListReferencedBlobHashes(ctx context.Context) ([]string, error) 
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlstore: list referenced blob hashes: %w", err)
+	}
+	// PDF-паспорта лошадей тоже должны доехать до пиров вместе с фото.
+	horses, err := s.ListHorses(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: list referenced blob hashes: %w", err)
+	}
+	for _, h := range horses {
+		if id := h.Metadata[domain.MetaPassportSHA256]; id != "" {
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				out = append(out, id)
+			}
+		}
 	}
 	sort.Strings(out)
 	return out, nil
@@ -591,7 +604,8 @@ func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observa
 
 // BlobReferenced сообщает, ссылается ли на блоб хоть одно наблюдение:
 // observations.blob_ids (запись — blobs.id или legacy sha256) или
-// observation_photos.sha256. По этим ссылкам файл нельзя удалять физически.
+// observation_photos.sha256, либо это PDF-паспорт лошади
+// (metadata.passport_sha256). По этим ссылкам файл нельзя удалять физически.
 //
 // Стоимость: проверка выполняется отдельным COUNT-запросом с LIKE-условием по
 // CAST(blob_ids AS TEXT) плюс COUNT по observation_photos — на больших таблицах
@@ -600,6 +614,7 @@ func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observa
 // отдельная таблица ссылок blob->observation с индексом) придёт с ядром и
 // интеграционным слоем — здесь метод не переписываем, только фиксируем цену
 // и что каждый вызов из PruneBlobs стоит этих сканов (их два на блоб).
+// Проверка паспорта добавляет проход по horses (лошадей сотни, это дёшево).
 func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
 	patterns, err := s.blobRefPatterns(ctx, sha)
 	if err != nil {
@@ -620,7 +635,20 @@ func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
 	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM observation_photos WHERE LOWER(sha256) = LOWER(?)`, sha).Scan(&n); err != nil {
 		return false, fmt.Errorf("sqlstore: blob %s photo references: %w", sha, err)
 	}
-	return n > 0, nil
+	if n > 0 {
+		return true, nil
+	}
+	// Файл прикреплённого PDF-паспорта не удаляем с диска.
+	horses, err := s.ListHorses(ctx)
+	if err != nil {
+		return false, fmt.Errorf("sqlstore: blob %s passport references: %w", sha, err)
+	}
+	for _, h := range horses {
+		if strings.EqualFold(h.Metadata[domain.MetaPassportSHA256], sha) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ListBlobs возвращает зарегистрированные блобы, кроме мягко удалённых.

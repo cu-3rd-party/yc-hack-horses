@@ -88,6 +88,8 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/horses", createHorse(d))
 		v1.Patch("/horses/{id}", patchHorse(d))
 		v1.Get("/horses/{id}", getHorse(d))
+		v1.Put("/horses/{id}/passport", putHorsePassport(d))
+		v1.Get("/horses/{id}/passport", getHorsePassport(d))
 
 		v1.Get("/observations", listObservations(d))
 		v1.Post("/observations", createObservation(d))

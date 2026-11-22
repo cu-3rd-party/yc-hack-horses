@@ -258,6 +258,38 @@ func buildOpenAPISpec() []byte {
 		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
 	})
 
+	putPassport := add("/api/v1/horses/{id}/passport", "put", "Загрузить PDF-паспорт лошади", "putHorsePassport", "horses",
+		"multipart/form-data: file — PDF до 50 MiB (проверяется сигнатура %PDF-), studbook_number — номер "+
+			"по племкниге (опционально). Файл сохраняется как блоб, пишется событие horse.passport_attached, "+
+			"в metadata лошади появляются passport_sha256, passport_filename, passport_size, passport_attached_at "+
+			"и studbook_number. Повторная загрузка заменяет паспорт; паспорт синхронизируется на другие ноды.")
+	putPassport.Parameters = []parameter{idParam("id", "UUID лошади")}
+	putPassport.RequestBody = &requestBody{
+		Description: "multipart/form-data с полями file и studbook_number.",
+		Required:    true,
+		Content: map[string]mediaTypeValue{
+			"multipart/form-data": {Schema: schemaNode{"type": "object"}.
+				prop("file", schemaNode{"type": "string", "format": "binary", "description": "PDF до 50 MiB"}).
+				prop("studbook_number", strSchema("номер по племенной книге, например 7706"))},
+		},
+	}
+	putPassport.Responses = merge(stdErrors(true), map[string]resp{
+		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
+		"413": {Description: "файл больше 50 MiB", Content: errorRef},
+		"415": {Description: "файл не PDF", Content: errorRef},
+	})
+
+	getPassport := add("/api/v1/horses/{id}/passport", "get", "Получить PDF-паспорт лошади", "getHorsePassport", "horses",
+		"Отдаёт PDF (application/pdf, Content-Disposition: inline) для просмотра в браузере; ETag = sha256. "+
+			"404 — лошади нет, паспорт не загружен или файл ещё не доехал по синку.")
+	getPassport.Parameters = []parameter{idParam("id", "UUID лошади")}
+	getPassport.Responses = merge(stdErrors(true), map[string]resp{
+		"200": {Description: "PDF-паспорт", Content: map[string]mediaTypeValue{
+			"application/pdf": {Schema: schemaNode{"type": "string", "format": "binary"}},
+		}},
+		"304": {Description: "не изменился (If-None-Match)"},
+	})
+
 	create := add("/api/v1/comparisons", "post", "Сравнить лошадей на снимке", "createComparison", "comparisons", "Каждая детекция имеет свою разметку и список особей по косинусному сходству.")
 	create.RequestBody = &requestBody{Required: true, Content: jsonContent(schemaRef("ComparisonRequest"))}
 	create.Responses = merge(stdErrors(true), map[string]resp{

@@ -292,24 +292,8 @@ func uploadBlob(d Deps) http.HandlerFunc {
 			writeError(w, http.StatusRequestEntityTooLarge, "blob too large")
 			return
 		}
-		sum := sha256Hex(data)
-		mime := header.Header.Get("Content-Type")
-		if err := d.Blobs.Put(r.Context(), sum, mime, data); err != nil {
-			serverError(w, err)
-			return
-		}
-		// метаданные + событие blob.registered только при первой регистрации
-		blob := domain.Blob{ID: uuid.Must(uuid.NewV7()).String(), SHA256: sum, MimeType: mime, Size: int64(len(data))}
-		var created bool
-		if err := d.Store.RunInTx(r.Context(), func(tx *sqlstore.Store) error {
-			var err error
-			created, err = tx.UpsertBlob(r.Context(), blob)
-			if err != nil || !created {
-				return err
-			}
-			_, err = appendLocalEvent(r.Context(), tx, d.NodeID, domain.EventBlobRegistered, sum, mustJSON(blob))
-			return err
-		}); err != nil {
+		blob, created, err := registerBlob(r.Context(), d, data, header.Header.Get("Content-Type"))
+		if err != nil {
 			serverError(w, err)
 			return
 		}
@@ -317,8 +301,29 @@ func uploadBlob(d Deps) http.HandlerFunc {
 		if !created {
 			status = http.StatusOK // дедупликация: блоб уже был
 		}
-		writeJSON(w, status, domain.Blob{SHA256: sum, MimeType: mime, Size: int64(len(data))})
+		writeJSON(w, status, domain.Blob{SHA256: blob.SHA256, MimeType: blob.MimeType, Size: blob.Size})
 	}
+}
+
+// registerBlob кладёт содержимое в content-addressed хранилище и пишет
+// метаданные + событие blob.registered только при первой регистрации sha256.
+func registerBlob(ctx context.Context, d Deps, data []byte, mime string) (domain.Blob, bool, error) {
+	sum := sha256Hex(data)
+	if err := d.Blobs.Put(ctx, sum, mime, data); err != nil {
+		return domain.Blob{}, false, err
+	}
+	blob := domain.Blob{ID: uuid.Must(uuid.NewV7()).String(), SHA256: sum, MimeType: mime, Size: int64(len(data))}
+	var created bool
+	err := d.Store.RunInTx(ctx, func(tx *sqlstore.Store) error {
+		var err error
+		created, err = tx.UpsertBlob(ctx, blob)
+		if err != nil || !created {
+			return err
+		}
+		_, err = appendLocalEvent(ctx, tx, d.NodeID, domain.EventBlobRegistered, sum, mustJSON(blob))
+		return err
+	})
+	return blob, created, err
 }
 
 func listBlobs(d Deps) http.HandlerFunc {
