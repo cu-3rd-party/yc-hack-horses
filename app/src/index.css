@@ -1462,12 +1462,6 @@ option:checked > .option-check {
 }
 .model-row [role=alert] { margin-block: 8px 0; color: var(--error); }
 
-.horse-nav-icon {
-  flex: none;
-  width: 18px;
-  font: normal 16px/1 "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  text-align: center;
-}
 .passport-action {
   display: grid;
   justify-items: start;
