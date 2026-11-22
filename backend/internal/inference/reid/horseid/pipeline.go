@@ -170,22 +170,18 @@ func (p *horsePipeline) embedCrops(img image.Image, det *Detection) (Embedding, 
 	return emb, nil
 }
 
-// concatVector собирает вектор дескриптора: сначала head256, затем body256.
-// Отсутствующая часть пропускается (HasHead/HasBody), длина = 512 или 256.
+// concatVector собирает дескриптор фиксированной длины 2×EmbedDim:
+// [0:256) — head, [256:512) — body. Отсутствующая половина — нули
+// (договорённость comparison: нулевая половина = части нет).
 func concatVector(emb Embedding) []float64 {
-	switch {
-	case emb.HasHead && emb.HasBody:
-		v := make([]float64, 0, 2*EmbedDim)
-		v = append(v, emb.Head...)
-		v = append(v, emb.Body...)
-		return v
-	case emb.HasHead:
-		return append([]float64(nil), emb.Head...)
-	case emb.HasBody:
-		return append([]float64(nil), emb.Body...)
-	default:
-		return nil
+	v := make([]float64, 2*EmbedDim)
+	if emb.HasHead {
+		copy(v[:EmbedDim], emb.Head)
 	}
+	if emb.HasBody {
+		copy(v[EmbedDim:], emb.Body)
+	}
+	return v
 }
 
 // buildHeadBox строит квадратный head-бокс по точкам {0 нос, 1,2 глаза, 3,4 уши}

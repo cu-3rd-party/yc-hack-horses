@@ -157,7 +157,8 @@ func loadGalleryMeta(path string) (galleryMeta, error) {
 }
 
 // loadF32Rows читает матрицу [rows][EmbedDim] little-endian float32.
-// Строка, содержащая NaN, считается отсутствующей частью и возвращается как nil.
+// Строка с не-финитным значением (NaN или ±Inf, как np.isfinite в demo_app.py)
+// считается отсутствующей частью и возвращается как nil.
 func loadF32Rows(path string, rows int) ([][]float64, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -174,7 +175,7 @@ func loadF32Rows(path string, rows int) ([][]float64, error) {
 		absent := false
 		for k := 0; k < EmbedDim; k++ {
 			v := math.Float32frombits(binary.LittleEndian.Uint32(b[(i*EmbedDim+k)*4:]))
-			if math.IsNaN(float64(v)) {
+			if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
 				absent = true
 				break
 			}

@@ -129,8 +129,9 @@ func TestPipelineWithoutHead(t *testing.T) {
 	require.Equal(t, 1, emb.bodyCalls)
 
 	vec := concatVector(res.Embedding)
-	require.Len(t, vec, EmbedDim)
-	require.Equal(t, filled(EmbedDim, 0.25), vec)
+	require.Len(t, vec, 2*EmbedDim)
+	require.Equal(t, make([]float64, EmbedDim), vec[:EmbedDim]) // головы нет — нули
+	require.Equal(t, filled(EmbedDim, 0.25), vec[EmbedDim:])
 }
 
 // TestPipelineNoDetection — пустой список боксов: inference.ErrNoAnimalDetected.

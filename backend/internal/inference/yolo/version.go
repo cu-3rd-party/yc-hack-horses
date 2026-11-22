@@ -1,6 +1,8 @@
 package yolo
 
 import (
+	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,18 +43,91 @@ func modelVersionForPath(modelPath string) string {
 	return resolveModelVersion(modelPath, onnxMetaDescription(modelPath))
 }
 
-// onnxMetaDescription читает metadata_props["description"] из ONNX-файла.
-// Любая ошибка чтения или отсутствие поля → пустая строка: версия определится
-// по имени файла, движок не падает.
+// onnxMetaDescription читает metadata_props["description"] из ONNX-файла
+// потоково: payload полей графа пропускается через буфер, файл целиком в
+// память не читается (модели бывают 300МБ+). Любая ошибка чтения или
+// отсутствие поля → пустая строка: версия определится по имени файла.
 func onnxMetaDescription(path string) string {
-	if path == "" {
-		return ""
-	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}
-	return onnxDescriptionFromProto(data)
+	defer f.Close()
+	return onnxDescriptionFromReader(bufio.NewReaderSize(f, 64<<10))
+}
+
+// onnxDescriptionFromReader — потоковый вариант сканера: как
+// onnxDescriptionFromProto, но length-delimited payload неизвестных полей
+// вычитывается через io.CopyN в io.Discard, не оседая в памяти.
+func onnxDescriptionFromReader(r io.Reader) string {
+	br := bufio.NewReader(r)
+	for {
+		tag, n := readVarintR(br)
+		if n <= 0 {
+			return ""
+		}
+		field, wire := int(tag>>3), tag&7
+		switch wire {
+		case 0: // varint
+			if _, n := readVarintR(br); n <= 0 {
+				return ""
+			}
+		case 1: // 64-битное значение
+			if _, err := io.CopyN(io.Discard, br, 8); err != nil {
+				return ""
+			}
+		case 2: // length-delimited
+			ln, n := readVarintR(br)
+			if n <= 0 {
+				return ""
+			}
+			if field == 14 {
+				// Метаданные маленькие — читаем целиком.
+				if ln > 1<<20 {
+					return ""
+				}
+				entry := make([]byte, ln)
+				if _, err := io.ReadFull(br, entry); err != nil {
+					return ""
+				}
+				if v := descriptionFromEntry(entry); v != "" {
+					return v
+				}
+				continue
+			}
+			if _, err := io.CopyN(io.Discard, br, int64(ln)); err != nil {
+				return ""
+			}
+		case 5: // 32-битное значение
+			if _, err := io.CopyN(io.Discard, br, 4); err != nil {
+				return ""
+			}
+		default:
+			// Группы (wire 3/4) в ONNX не встречаются — прекращаем разбор.
+			return ""
+		}
+	}
+}
+
+// readVarintR читает base-128 varint из r; возвращает значение и 1 при успехе,
+// 0 при ошибке/обрыве.
+func readVarintR(r io.ByteReader) (uint64, int) {
+	var v uint64
+	var shift uint
+	for {
+		b, err := r.ReadByte()
+		if err != nil {
+			return 0, 0
+		}
+		v |= uint64(b&0x7f) << shift
+		if b < 0x80 {
+			return v, 1
+		}
+		shift += 7
+		if shift >= 64 {
+			return 0, 0
+		}
+	}
 }
 
 // onnxDescriptionFromProto ищет в ModelProto поле 14 (metadata_props,
