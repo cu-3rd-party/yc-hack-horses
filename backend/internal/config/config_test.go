@@ -55,3 +55,15 @@ func TestValidationRejectsBadDriver(t *testing.T) {
 	_, err := Load("")
 	require.Error(t, err, "expected validation error for unknown driver")
 }
+
+func TestHorseIDEngineRequiresPaths(t *testing.T) {
+	c := Default()
+	c.Inference.Engine = "horseid"
+	require.Error(t, c.Validate(), "без путей horseid невалиден")
+	c.Inference.ModelPath = "/app/models/yolo11s.onnx"
+	require.Error(t, c.Validate(), "нужен runtime_lib")
+	c.Inference.RuntimeLib = "/app/models/libonnxruntime.so"
+	require.Error(t, c.Validate(), "нужен reid_model_dir")
+	c.Inference.ReIDModelDir = "/app/models"
+	require.NoError(t, c.Validate(), "полный набор путей валиден")
+}

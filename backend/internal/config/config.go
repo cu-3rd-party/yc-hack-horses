@@ -66,14 +66,18 @@ type Config struct {
 	} `yaml:"sync"`
 	// Inference — локальный CV-движок (ADR-0012).
 	Inference struct {
-		// Engine — unavailable | reference | yolo (default: unavailable).
+		// Engine — unavailable | reference | yolo | horseid (default: unavailable).
 		Engine        string `yaml:"engine"`
 		ComparisonURL string `yaml:"comparison_url"`
 		ModelBaseURL  string `yaml:"model_base_url"`
-		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
+		// ModelPath — путь к ONNX-весам детектора (вне git): engine=yolo —
+		// yolov8n.onnx; engine=horseid — yolo11s.onnx (класс 17 horse).
 		ModelPath string `yaml:"model_path"`
-		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
-		RuntimeLib   string `yaml:"runtime_lib"`
+		// RuntimeLib — путь к onnxruntime shared library (engine=yolo|horseid).
+		RuntimeLib string `yaml:"runtime_lib"`
+		// ReIDModelDir — каталог ReID-моделей. Для engine=horseid в нём лежат
+		// vitpose-plus-base-256x192.onnx, dinov2-b14-224.onnx и обученные веса
+		// голов/банка (heads_*/gallery_*.f32, gallery.json, meta.json).
 		ReIDModelDir string `yaml:"reid_model_dir"`
 	} `yaml:"inference"`
 	// Enrollment — автоматическая выдача клиентских сертификатов
@@ -275,8 +279,21 @@ func (c *Config) Validate() error {
 		if c.Inference.RuntimeLib == "" {
 			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
 		}
+	case "horseid":
+		// horseid (HANDOFF_GO.md): детектор yolo11s — model_path, ReID-модели
+		// (vitpose, dinov2, головы/банк) — reid_model_dir; инференс через
+		// onnxruntime — runtime_lib.
+		if c.Inference.ModelPath == "" {
+			return fmt.Errorf("config: inference.engine horseid: требуется inference.model_path (yolo11s.onnx)")
+		}
+		if c.Inference.RuntimeLib == "" {
+			return fmt.Errorf("config: inference.engine horseid: требуется inference.runtime_lib")
+		}
+		if c.Inference.ReIDModelDir == "" {
+			return fmt.Errorf("config: inference.engine horseid: требуется inference.reid_model_dir")
+		}
 	default:
-		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference | yolo", c.Inference.Engine)
+		return fmt.Errorf("config: inference.engine %q: допустимо unavailable | reference | yolo | horseid", c.Inference.Engine)
 	}
 	return nil
 }
