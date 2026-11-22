@@ -198,3 +198,4 @@ gRPC-клиенты работали через тот же домен (`yc-hack
 ## Документация
 - ADR: `docs/adr/`
 - Протокол синхронизации: `backend/api/proto/sync/v1/sync.proto`
+- Атрибуция портированных алгоритмов ReID: [NOTICE.md](NOTICE.md)

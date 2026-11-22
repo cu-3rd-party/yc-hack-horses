@@ -12,6 +12,7 @@ import (
 	"image"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 )
 
 // Engine — заглушка: инференсу нужен onnxruntime через cgo.
@@ -23,6 +24,13 @@ type Engine struct {
 func New(cfg Config) *Engine {
 	return &Engine{cfg: cfg}
 }
+
+// SetFusionConfig — та же сигнатура, что в cgo-варианте: инференс без CGO
+// недоступен, коэффициенты просто сохраняются для совместимости API.
+func (e *Engine) SetFusionConfig(fc *reid.FusionConfig) { e.cfg.FusionConfig = fc }
+
+// FusionConfig — та же сигнатура, что в cgo-варианте.
+func (e *Engine) FusionConfig() *reid.FusionConfig { return e.cfg.FusionConfig }
 
 // unavailable — причина деградации: бинарник собран без cgo.
 func (e *Engine) unavailable() error {

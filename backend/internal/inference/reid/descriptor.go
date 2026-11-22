@@ -61,9 +61,11 @@ func Validate(e inference.EmbeddingResult) error {
 	return nil
 }
 
-// IsSilhouette identifies MegaDescriptor versions encoded from the predicted foreground.
+// IsSilhouette identifies versions whose foreground was modified before
+// encoding: real silhouette masks and the central-crop fallback. Similarity
+// keeps each of these spaces separate from raw bounding-box descriptors.
 func IsSilhouette(version string) bool {
-	return version == Version || version == publishedHeadsVersion
+	return version == Version || version == publishedHeadsVersion || version == centralVersion
 }
 
 // Similarity keeps different foreground preprocessors in separate retrieval spaces.

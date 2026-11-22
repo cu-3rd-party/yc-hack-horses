@@ -30,6 +30,7 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/enroll"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
@@ -177,6 +178,17 @@ func New(cfg *config.Config) (*App, error) {
 			IncludeMasks:   true,
 			Blobs:          blobs,
 		})
+		// Внешние коэффициенты скоринга ReID (калибровка/фьюжн/open-set):
+		// файл опционален, отсутствие — дефолтное поведение (сырой скор).
+		// Ошибка явного пути — фатальна при старте: тихий fallback скрыл бы
+		// опечатку в конфиге.
+		if cfg.Inference.ReIDFusionConfig != "" {
+			fc, err := reid.LoadFusionConfig(cfg.Inference.ReIDFusionConfig)
+			if err != nil {
+				return nil, err
+			}
+			detector.SetFusionConfig(fc)
+		}
 		cvEngine = detector
 		comparisonModel = comparison.LocalModel{Detector: detector}
 		if cfg.Inference.ComparisonURL == "" {

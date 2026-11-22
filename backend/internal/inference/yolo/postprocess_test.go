@@ -52,6 +52,25 @@ func TestDecodeOutputBelowThreshold(t *testing.T) {
 	require.Empty(t, decodeOutput(data, horseClassID, 0.25))
 }
 
+// TestDecodeOutputClassesKeepsCrossClassDuplicates — набор классов животных
+// (как в zapovednik) пропускает лошадь и корову; пересечение убирает nms.
+func TestDecodeOutputClassesKeepsCrossClassDuplicates(t *testing.T) {
+	rows := []float32{
+		10, 22, 82, 98, .91, 17, // horse
+		10, 22, 82, 98, .45, 19, // cow: тот же бокс, другой класс
+		15, 18, 80, 97, .99, 16, // dog — чужой класс
+		12, 20, 80, 100, .60, 18, // sheep: второй объект
+	}
+	dets := decodeEndToEndClasses(rows, animalClassIDs, .25)
+	require.Len(t, dets, 2)
+	require.Equal(t, 17, dets[0].ClassID)
+	require.Equal(t, 18, dets[1].ClassID)
+	// cross-class NMS: при пороге 0.95 пересекающийся дубль-бокс коровы
+	// уже схлопнут по идентичному боксу, а два разных объекта остаются
+	kept := nms(decodeEndToEndClasses(rows, animalClassIDs, .25), 0.95)
+	require.Len(t, kept, 2)
+}
+
 // TestNMS — пересекающиеся боксы подавляются, разные остаются.
 func TestNMS(t *testing.T) {
 	dets := []Detection{

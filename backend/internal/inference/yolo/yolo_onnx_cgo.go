@@ -33,6 +33,9 @@ import (
 // (ADR-0012: человек вводит признаки сам).
 type Engine struct {
 	cfg Config
+	// fusionCfg — внешние коэффициенты скоринга ReID; nil — сырой скор.
+	// Читается после New/SetFusionConfig до старта обработки, мутации нет.
+	fusionCfg   *reid.FusionConfig
 
 	life        sync.RWMutex
 	reidOnce    sync.Once
@@ -49,6 +52,13 @@ type Engine struct {
 }
 
 // New создаёт движок. Загрузка модели отложена до первого вызова.
+// SetFusionConfig включает внешние коэффициенты скоринга (калибровка,
+// веса фьюжна, open-set порог). Вызывать до начала обработки запросов.
+func (e *Engine) SetFusionConfig(fc *reid.FusionConfig) { e.fusionCfg = fc }
+
+// FusionConfig возвращает активные коэффициенты (nil — не заданы).
+func (e *Engine) FusionConfig() *reid.FusionConfig { return e.fusionCfg }
+
 func New(cfg Config) *Engine {
 	if cfg.ConfThreshold <= 0 || cfg.ConfThreshold >= 1 {
 		cfg.ConfThreshold = DefaultConfThreshold
@@ -59,7 +69,7 @@ func New(cfg Config) *Engine {
 	if cfg.Delegate == nil {
 		cfg.Delegate = NewHistogramDelegate()
 	}
-	return &Engine{cfg: cfg}
+	return &Engine{cfg: cfg, fusionCfg: cfg.FusionConfig}
 }
 
 // ensureSession лениво инициализирует onnxruntime и сессию модели.
@@ -128,12 +138,13 @@ func (e *Engine) detect(img image.Image) ([]Detection, letterboxParams, error) {
 		return nil, lr.params, fmt.Errorf("yolo: expected float32 detector output")
 	}
 	shape := out.GetShape()
+	classes := e.detectionClasses()
 	switch {
 	case shape.Equals(ort.NewShape(1, numChannels, numAnchors)):
-		dets := decodeOutput(out.GetData(), horseClassID, e.cfg.ConfThreshold)
+		dets := decodeOutputClasses(out.GetData(), classes, e.cfg.ConfThreshold)
 		return nms(dets, e.cfg.IouThreshold), lr.params, nil
 	case shape.Equals(ort.NewShape(1, 300, 6)):
-		return decodeEndToEnd(out.GetData(), horseClassID, e.cfg.ConfThreshold), lr.params, nil
+		return decodeEndToEndClasses(out.GetData(), classes, e.cfg.ConfThreshold), lr.params, nil
 	default:
 		return nil, lr.params, fmt.Errorf("yolo: unsupported detector output shape %v", shape)
 	}
@@ -158,7 +169,7 @@ func (e *Engine) ExtractTraits(ctx context.Context, input inference.ImageInput) 
 		return inference.TraitResult{}, err
 	}
 	if len(dets) == 0 {
-		return inference.TraitResult{}, fmt.Errorf("%w: class %d, conf %.2f", inference.ErrNoAnimalDetected, horseClassID, e.cfg.ConfThreshold)
+		return inference.TraitResult{}, fmt.Errorf("%w: classes %v, conf %.2f", inference.ErrNoAnimalDetected, e.detectionClasses(), e.cfg.ConfThreshold)
 	}
 	// Для одиночного снимка признаков нужна самая уверенная детекция.
 	best := dets[0]
@@ -240,7 +251,7 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 			if err != nil {
 				return nil, err
 			}
-			if !first {
+			if !first || e.cfg.DualVariant {
 				e.measureInstance(ctx, img, row)
 				if err := ctx.Err(); err != nil {
 					return nil, err
@@ -254,6 +265,24 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 }
 
 func (e *Engine) measureInstance(ctx context.Context, img image.Image, row *InstanceEmbedding) {
+	// Двухвариантное кодирование: masked-эмбеддинг нужен и первому кропу.
+	// Сегментер лениво открывается ниже; при ошибке деградируем к
+	// центральному кропу (fallback-версия), не изобретая фильтр фона.
+	if e.cfg.DualVariant && e.encoder != nil && row.MaskedEmbedding == nil {
+		e.segmentOnce.Do(func() { e.segmenter, e.segmentErr = reid.OpenSegmenter(e.cfg.ReIDModelDir) })
+		var masked inference.EmbeddingResult
+		var err error
+		if e.segmentErr != nil {
+			masked, err = e.encoder.EmbedCentral(ctx, img, row.Box)
+		} else {
+			_, masked, err = e.encoder.EmbedDual(ctx, img, row.Box, e.segmenter)
+		}
+		if err != nil {
+			row.MeasurementError = err.Error()
+			return
+		}
+		row.MaskedEmbedding = &masked
+	}
 	e.segmentOnce.Do(func() { e.segmenter, e.segmentErr = reid.OpenSegmenter(e.cfg.ReIDModelDir) })
 	if e.segmentErr != nil {
 		row.MeasurementError = e.segmentErr.Error()

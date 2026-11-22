@@ -96,6 +96,59 @@ func decodeEndToEnd(data []float32, classID int, confThreshold float64) []Detect
 	return unique
 }
 
+// decodeOutputClasses — как decodeOutput, но по набору классов: лошади
+// Пржевальского детектор нередко путает с коровой/овцой/зеброй (как в
+// zapovednik-public). Пересекающиеся боксы разных классов затем убирает nms
+// (cross-class NMS как в ml/reid/detect.py).
+func decodeOutputClasses(data []float32, classIDs []int, confThreshold float64) []Detection {
+	var out []Detection
+	for _, classID := range classIDs {
+		out = append(out, decodeOutput(data, classID, confThreshold)...)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Confidence > out[j].Confidence })
+	return out
+}
+
+// decodeEndToEndClasses — как decodeEndToEnd, но по набору классов
+// (YOLO26 отдаёт class id в последней колонке).
+func decodeEndToEndClasses(data []float32, classIDs []int, confThreshold float64) []Detection {
+	allowed := make(map[int]bool, len(classIDs))
+	for _, id := range classIDs {
+		allowed[id] = true
+	}
+	var out []Detection
+	for len(data) >= 6 {
+		row := data[:6]
+		data = data[6:]
+		if allowed[int(row[5])] && float64(row[4]) >= confThreshold {
+			out = append(out, Detection{
+				Box:        box{int(row[0]), int(row[1]), int(row[2]), int(row[3])},
+				Confidence: float64(row[4]),
+				ClassID:    int(row[5]),
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Confidence > out[j].Confidence })
+	seen := make(map[box]bool, len(out))
+	unique := out[:0]
+	for _, d := range out {
+		if !seen[d.Box] {
+			unique = append(unique, d)
+			seen[d.Box] = true
+		}
+	}
+	return unique
+}
+
+// detectionClasses — активный набор классов: переопределение из конфига
+// или стандартный набор животных.
+func (e *Engine) detectionClasses() []int {
+	if len(e.cfg.DetectionClasses) > 0 {
+		return e.cfg.DetectionClasses
+	}
+	return animalClassIDs
+}
+
 // nms — non-maximum suppression: убирает пересекающиеся боксы с IoU > threshold.
 // Вход уже отсортирован по убыванию уверенности.
 func nms(dets []Detection, iouThreshold float64) []Detection {

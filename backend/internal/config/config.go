@@ -75,6 +75,14 @@ type Config struct {
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
 		RuntimeLib   string `yaml:"runtime_lib"`
 		ReIDModelDir string `yaml:"reid_model_dir"`
+		// ReIDDualVariant — двухвариантное кодирование ReID (raw + masked,
+		// приём против фонового переобучения из zapovednik-public).
+		// По умолчанию выключено: старое поведение (только raw).
+		ReIDDualVariant bool `yaml:"reid_dual_variant"`
+		// ReIDFusionConfig — путь к JSON-файлу коэффициентов скоринга
+		// (калибровка логрегрессией, веса фьюжна, open-set порог; см.
+		// NOTICE.md). Пусто — скоринг сырым фьюжн-скором (дефолт).
+		ReIDFusionConfig string `yaml:"reid_fusion_config"`
 	} `yaml:"inference"`
 	// Enrollment — автоматическая выдача клиентских сертификатов
 	// (ADR-0007 amended, ADR-0014). Включается только на central-ноде;
@@ -175,6 +183,8 @@ func (c *Config) applyEnv() {
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
 	envString("INFER_REID_MODEL_DIR", &c.Inference.ReIDModelDir)
+	envBool("INFER_REID_DUAL_VARIANT", &c.Inference.ReIDDualVariant)
+	envString("INFER_REID_FUSION_CONFIG", &c.Inference.ReIDFusionConfig)
 	envString("WEB_DIR", &c.Api.WebDir)
 	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
 	envBool("ENROLLMENT_ENABLED", &c.Enrollment.Enabled)
