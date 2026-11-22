@@ -13,9 +13,9 @@ import (
 func TestVisualSimilarityAcrossDescriptorVersions(t *testing.T) {
 	va, vb := make([]float32, Dimension), make([]float32, Dimension)
 	va[0], vb[0], vb[1] = 2, 3, 4
-	a, err := visualEmbedding(va)
+	a, err := visualEmbedding(va, BoxVersion)
 	require.NoError(t, err)
-	b, err := visualEmbedding(vb)
+	b, err := visualEmbedding(vb, BoxVersion)
 	require.NoError(t, err)
 	asLegacy := func(e inference.EmbeddingResult) inference.EmbeddingResult {
 		old := make([]float32, Dimension+10)
@@ -36,8 +36,23 @@ func TestVisualSimilarityAcrossDescriptorVersions(t *testing.T) {
 			}
 		}
 	}
-	_, err = visualEmbedding(make([]float32, Dimension))
+	_, err = visualEmbedding(make([]float32, Dimension), Version)
 	require.Error(t, err)
+	for _, v := range []string{Version, publishedHeadsVersion} {
+		masked := a
+		masked.ModelVersion = v
+		require.NoError(t, Validate(masked))
+		_, err = Similarity(masked, b)
+		require.Error(t, err)
+		_, err = Similarity(masked, masked)
+		require.NoError(t, err)
+		other := masked
+		other.ModelVersion = Version
+		if v != Version {
+			_, err = Similarity(masked, other)
+			require.Error(t, err)
+		}
+	}
 	b.ModelVersion = "reference-v1"
 	_, err = Similarity(a, b)
 	require.Error(t, err)

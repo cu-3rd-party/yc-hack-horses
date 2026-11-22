@@ -37,3 +37,23 @@ func maskPNG(samples []pixel, box image.Rectangle) ([]byte, error) {
 	err := png.Encode(&buf, mask)
 	return buf.Bytes(), err
 }
+
+// maskBackground paints an owned RGB crop before resizing it for MegaDescriptor.
+// Only the silhouette bit gates the input. Use nearest grid-cell centres in both axes.
+func maskBackground(img *image.RGBA, box image.Rectangle, samples []pixel) bool {
+	w, h := min(128, box.Dx()), min(128, box.Dy())
+	seen := false
+	for y := range box.Dy() {
+		row := (2*y + 1) * h / (2 * box.Dy()) * w
+		for x := range box.Dx() {
+			idx := row + (2*x+1)*w/(2*box.Dx())
+			if samples[idx].body {
+				seen = true
+				continue
+			}
+			i := img.PixOffset(box.Min.X+x, box.Min.Y+y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 127, 127, 127, 255
+		}
+	}
+	return seen
+}

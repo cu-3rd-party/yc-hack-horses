@@ -162,6 +162,7 @@ module.exports = async function ensureLocalNode(app) {
   const processNode = spawn(executable, ['web'], {
     cwd: dir,
     env: {
+      // An explicit INFER_MODEL_PATH passes through. The node resolves its default in DATA_DIR.
       ...process.env,
       ...enroll.buildNodeEnv({
         dataDir: dir,

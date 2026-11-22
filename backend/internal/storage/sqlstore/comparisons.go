@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -61,8 +62,8 @@ func (s *Store) CreateReviewedObservation(ctx context.Context, record comparison
 		if err != nil {
 			return err
 		}
-		_, err = s.exec(ctx, `INSERT INTO observation_photos (id,observation_id,sha256,name,annotation,model_version,embedding)
-			VALUES (?,?,?,?,?,?,?)`, p.ID, record.ID, p.SHA, p.Name, string(annotation), p.Version, string(embedding))
+		_, err = s.exec(ctx, `INSERT INTO observation_photos (id,observation_id,sha256,name,annotation,model_version,embedding,capture_time)
+			VALUES (?,?,?,?,?,?,?,NULLIF(?,''))`, p.ID, record.ID, p.SHA, p.Name, string(annotation), p.Version, string(embedding), p.CaptureTime)
 		if err != nil {
 			return err
 		}
@@ -71,7 +72,7 @@ func (s *Store) CreateReviewedObservation(ctx context.Context, record comparison
 }
 
 func (s *Store) References(ctx context.Context, version string) ([]comparison.Reference, error) {
-	rows, err := s.query(ctx, `SELECT h.id,h.metadata,p.id,p.embedding FROM observation_photos p
+	rows, err := s.query(ctx, `SELECT h.id,h.metadata,p.id,p.embedding,p.sha256,p.capture_time FROM observation_photos p
 		JOIN observations o ON o.id=p.observation_id JOIN horses h ON h.id=o.horse_id
 		WHERE p.model_version=? AND h.identity_status <> 'merged'`, version)
 	if err != nil {
@@ -82,10 +83,13 @@ func (s *Store) References(ctx context.Context, version string) ([]comparison.Re
 	for rows.Next() {
 		var r comparison.Reference
 		var vector, metadata string
-		if err := rows.Scan(&r.HorseID, &metadata, &r.PhotoID, &vector); err != nil {
+		var capture sql.NullString
+		if err := rows.Scan(&r.HorseID, &metadata, &r.PhotoID, &vector, &r.SHA, &capture); err != nil {
 			return nil, err
 		}
 		r.Version = version
+		r.CaptureTime = capture.String
+		r.NeedsCapture = !capture.Valid
 		if err := json.Unmarshal([]byte(vector), &r.Vector); err != nil {
 			return nil, err
 		}
@@ -103,6 +107,11 @@ func (s *Store) References(ctx context.Context, version string) ([]comparison.Re
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) SetLegacyCapture(ctx context.Context, sha, capture string) error {
+	_, err := s.exec(ctx, "UPDATE observation_photos SET capture_time=? WHERE sha256=? AND capture_time IS NULL", capture, sha)
+	return err
 }
 
 func (s *Store) ObservationHistory(ctx context.Context, horseID string, annotations bool) ([]comparison.History, error) {

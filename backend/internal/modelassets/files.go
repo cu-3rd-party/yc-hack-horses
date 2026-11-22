@@ -10,6 +10,8 @@ import (
 )
 
 const (
+	defaultDetectorFile  = "yolo26x.onnx"
+	legacyDetectorFile   = "yolov8n.onnx"
 	DescriptorONNX       = "megadescriptor-l-384.onnx"
 	DescriptorCheckpoint = "megadescriptor-l-384.bin"
 	checkpointSHA        = "ccfe757f50f7984a115ffe00921cd4c09e260e645215463b23814586040227a3"
@@ -18,6 +20,20 @@ const (
 )
 
 var errChecksum = errors.New("unexpected model checksum")
+
+// DefaultDetectorPath selects YOLO26x for new installations and honors offline
+// installations that have already provisioned only the earlier YOLOv8n weights.
+func DefaultDetectorPath(dir string) string {
+	preferred := filepath.Join(dir, defaultDetectorFile)
+	if _, err := os.Stat(preferred); !errors.Is(err, os.ErrNotExist) {
+		return preferred
+	}
+	legacy := filepath.Join(dir, legacyDetectorFile)
+	if info, err := os.Stat(legacy); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+		return legacy
+	}
+	return preferred
+}
 
 type modelFile struct {
 	path, sha string

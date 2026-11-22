@@ -12,6 +12,7 @@ export interface HorseAnnotation {
 export interface ComparisonRequest {
   blob_sha256: string;
   top_k: number;
+  capture_date?: string;
 }
 export interface ComparisonResult {
   comparison_id: string;
@@ -25,6 +26,8 @@ export interface ComparisonResult {
       name: string;
       cosine_similarity: number;
       best_photo_id: string;
+      reference_count?: number;
+      season_fallback?: boolean;
     }[];
   }[];
 }

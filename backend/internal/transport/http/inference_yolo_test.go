@@ -169,8 +169,9 @@ func TestInferenceTraitsInvalidBlob(t *testing.T) {
 func TestInferenceEngineFromConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.Inference.Engine = "yolo"
-	require.Error(t, cfg.Validate()) // без model_path/runtime_lib
-	cfg.Inference.ModelPath = "infra/models/yolov8n.onnx"
+	require.Error(t, cfg.Validate()) // без runtime_lib
 	cfg.Inference.RuntimeLib = "infra/models/libonnxruntime.so"
+	require.NoError(t, cfg.Validate())
+	cfg.Inference.ModelPath = "infra/models/yolov8n.onnx"
 	require.NoError(t, cfg.Validate())
 }

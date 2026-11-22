@@ -50,7 +50,7 @@ func TestVisualReIDOnFieldPhotos(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.Equal(t, reid.Version, v.ModelVersion)
+			require.Equal(t, reid.BoxVersion, v.ModelVersion)
 			require.Len(t, v.Vector, reid.Dimension)
 			s.embedding = v
 			gallery[visit] = append(gallery[visit], s)

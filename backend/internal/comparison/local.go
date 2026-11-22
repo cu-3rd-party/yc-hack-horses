@@ -57,11 +57,17 @@ func localPrediction(row yolo.InstanceEmbedding, frame image.Rectangle) (Predict
 	if row.Box.Empty() || !row.Box.In(frame) || !(row.Confidence >= 0 && row.Confidence <= 1) {
 		return Prediction{}, ErrModel
 	}
-	if row.MeasurementError != "" {
+	if row.MeasurementError != "" && row.Embedding.ModelVersion != reid.BoxVersion {
 		return Prediction{}, fmt.Errorf("%w: %s", ErrLocalSegmentation, row.MeasurementError)
 	}
 	annotation, err := AnnotationFromMask(row.MaskPNG, row.Traits, row.Box, frame)
-	if err != nil {
+	if errors.Is(err, ErrLocalSegmentation) && row.Embedding.ModelVersion == reid.BoxVersion {
+		left := float64(row.Box.Min.X-frame.Min.X) / float64(frame.Dx())
+		top := float64(row.Box.Min.Y-frame.Min.Y) / float64(frame.Dy())
+		right := float64(row.Box.Max.X-frame.Min.X) / float64(frame.Dx())
+		bottom := float64(row.Box.Max.Y-frame.Min.Y) / float64(frame.Dy())
+		annotation = Annotation{HorsePolygon: []Point{{left, top}, {right, top}, {right, bottom}, {left, bottom}}, Traits: []Trait{}}
+	} else if err != nil {
 		return Prediction{}, err
 	}
 	p := Prediction{

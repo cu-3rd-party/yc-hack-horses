@@ -22,10 +22,12 @@ type Annotation struct {
 	Traits       []Trait   `json:"traits"`
 }
 type Candidate struct {
-	HorseID     string  `json:"horse_id"`
-	Name        string  `json:"name"`
-	Similarity  float64 `json:"cosine_similarity"`
-	BestPhotoID string  `json:"best_photo_id"`
+	HorseID        string  `json:"horse_id"`
+	Name           string  `json:"name"`
+	Similarity     float64 `json:"cosine_similarity"`
+	BestPhotoID    string  `json:"best_photo_id"`
+	ReferenceCount int     `json:"reference_count"`
+	SeasonFallback bool    `json:"season_fallback"`
 }
 type Detection struct {
 	ID         string      `json:"detection_id"`
@@ -67,8 +69,9 @@ type History struct {
 
 // Descriptor is private to Go and replicated for confirmed reference photos.
 type Descriptor struct {
-	Version string    `json:"model_version"`
-	Vector  []float64 `json:"embedding"`
+	CaptureTime string    `json:"capture_time,omitempty"`
+	Version     string    `json:"model_version"`
+	Vector      []float64 `json:"embedding"`
 }
 type ReferencePhoto struct {
 	Photo

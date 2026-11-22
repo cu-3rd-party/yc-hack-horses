@@ -17,6 +17,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDetectorSelectionForNewAndExistingNodes(t *testing.T) {
+	dir := t.TempDir()
+	preferred := filepath.Join(dir, "yolo26x.onnx")
+	legacy := filepath.Join(dir, "yolov8n.onnx")
+	require.Equal(t, preferred, DefaultDetectorPath(dir))
+	m := New(DefaultDetectorPath(dir), dir, "", nil)
+	t.Cleanup(m.Close)
+	file := m.find("yolo")
+	require.Equal(t, "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x.onnx", file.source)
+	require.Equal(t, detector26xSHA, file.sha)
+	require.EqualValues(t, 223287479, file.Size)
+
+	require.NoError(t, os.WriteFile(legacy, []byte("installed legacy model"), 0600))
+	require.Equal(t, legacy, DefaultDetectorPath(dir))
+	require.NoError(t, os.WriteFile(preferred, []byte("installed preferred model"), 0600))
+	require.Equal(t, preferred, DefaultDetectorPath(dir))
+}
+
 func TestSeparateDownloadsVerifyCancelAndRetry(t *testing.T) {
 	contents := []byte("test model")
 	var attempts atomic.Int32

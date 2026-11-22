@@ -6,6 +6,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDecodeEndToEndOverlappingHorses(t *testing.T) {
+	rows := []float32{
+		12, 20, 80, 100, .60, 17,
+		10, 22, 82, 98, .91, 17,
+		10, 22, 82, 98, .45, 17,
+		15, 18, 80, 97, .99, 16,
+		15, 18, 80, 97, .10, 17,
+		0, 0, 0, 0, 0, 0,
+	}
+	dets := decodeEndToEnd(rows, horseClassID, .25)
+	require.Len(t, dets, 2)
+	require.Equal(t, box{10, 22, 82, 98}, dets[0].Box)
+	require.Equal(t, box{12, 20, 80, 100}, dets[1].Box)
+}
+
 // TestDecodeOutputFiltersAndSorts — декодер берёт только класс horse и
 // сортирует по убыванию уверенности.
 func TestDecodeOutputFiltersAndSorts(t *testing.T) {

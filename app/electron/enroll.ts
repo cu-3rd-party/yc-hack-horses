@@ -105,7 +105,6 @@ export function buildNodeEnv(input: NodeEnvInput): Record<string, string> {
     SYNC_ENABLED: input.syncEnabled ? 'true' : 'false',
     SYNC_CENTRAL_URL: input.centralUrl ?? 'https://yc-hack-horses.cu3rd.ru',
     INFER_ENGINE: 'yolo',
-    INFER_MODEL_PATH: `${input.dataDir}/models/yolov8n.onnx`,
     INFER_REID_MODEL_DIR: `${input.dataDir}/models`,
     INFER_RUNTIME_LIB: `${input.nodeResourceDir}/${
       input.platform === 'darwin' ? 'libonnxruntime.dylib' : 'libonnxruntime.so'

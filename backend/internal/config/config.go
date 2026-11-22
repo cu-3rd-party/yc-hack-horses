@@ -70,7 +70,7 @@ type Config struct {
 		Engine        string `yaml:"engine"`
 		ComparisonURL string `yaml:"comparison_url"`
 		ModelBaseURL  string `yaml:"model_base_url"`
-		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
+		// ModelPath — путь к ONNX-весам YOLO. Пустой путь включает выбор из DATA_DIR/models.
 		ModelPath string `yaml:"model_path"`
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
 		RuntimeLib   string `yaml:"runtime_lib"`
@@ -269,9 +269,6 @@ func (c *Config) Validate() error {
 	switch c.Inference.Engine {
 	case "unavailable", "reference":
 	case "yolo":
-		if c.Inference.ModelPath == "" {
-			return fmt.Errorf("config: inference.engine yolo: требуется inference.model_path")
-		}
 		if c.Inference.RuntimeLib == "" {
 			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
 		}

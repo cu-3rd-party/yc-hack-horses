@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -100,6 +101,7 @@ func TestPipelineRealModel(t *testing.T) {
 		t.Skip("YOLO_MODEL_PATH/YOLO_RUNTIME_LIB не заданы: прогон на реальной модели пропущен")
 	}
 	e := New(Config{ModelPath: modelPath, RuntimeLibPath: libPath})
+	t.Cleanup(func() { e.Close() })
 
 	// Синтетическое изображение: серый прямоугольник — не лошадь. Честный
 	// тест: детекция отсутствует с корректной ошибкой ErrNoAnimalDetected.
@@ -123,7 +125,11 @@ func TestPipelineRealModel(t *testing.T) {
 			}
 			t.Fatalf("unexpected error: %v", err)
 		}
-		require.Equal(t, ModelVersion, res.ModelVersion)
+		expectedVersion := ModelVersion
+		if filepath.Base(modelPath) == "yolo26x.onnx" {
+			expectedVersion = "yolo26x-coco-v1"
+		}
+		require.Equal(t, expectedVersion, res.ModelVersion)
 		require.Greater(t, res.Confidence, 0.0)
 		require.LessOrEqual(t, res.Confidence, 1.0)
 		for _, k := range inference.CanonicalKeys {
@@ -131,7 +137,7 @@ func TestPipelineRealModel(t *testing.T) {
 		}
 		emb, err := e.Embed(context.Background(), inference.ImageInput{Reader: bytes.NewReader(data)})
 		require.NoError(t, err)
-		require.Equal(t, ModelVersion, emb.ModelVersion)
+		require.Equal(t, expectedVersion, emb.ModelVersion)
 		require.Len(t, emb.Vector, 64)
 		t.Logf("REAL RUN: model=%s conf=%.3f traits=%v", res.ModelVersion, res.Confidence, res.Traits)
 	}

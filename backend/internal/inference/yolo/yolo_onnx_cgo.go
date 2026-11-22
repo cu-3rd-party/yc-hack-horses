@@ -17,6 +17,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -42,6 +43,7 @@ type Engine struct {
 	segmentErr  error
 	mu          sync.Mutex
 	session     *ort.DynamicAdvancedSession
+	version     string
 	loadErr     error
 	loaded      bool
 }
@@ -87,7 +89,6 @@ func (e *Engine) ensureSession() error {
 		e.loadErr = fmt.Errorf("%w: init onnxruntime: %v", inference.ErrModelUnavailable, err)
 		return e.loadErr
 	}
-	// YOLOv8 ONNX: вход "images" 1x3x640x640, выход "output0" 1x84x8400.
 	session, err := ort.NewDynamicAdvancedSession(e.cfg.ModelPath,
 		[]string{"images"}, []string{"output0"}, nil)
 	if err != nil {
@@ -95,12 +96,19 @@ func (e *Engine) ensureSession() error {
 		return e.loadErr
 	}
 	e.session = session
+	e.version = ModelVersion
+	if meta, err := session.GetModelMetadata(); err == nil {
+		defer meta.Destroy()
+		description, _, _ := meta.LookupCustomMetadataMap("description")
+		if strings.Contains(description, "YOLO26x model") {
+			e.version = "yolo26x-coco-v1"
+		}
+	}
 	return nil
 }
 
-// runInference — letterbox + прогон сессии; возвращает данные выхода
-// 1x84x8400 и параметры letterbox для обратного маппинга координат.
-func (e *Engine) runInference(img image.Image) ([]float32, letterboxParams, error) {
+// detect returns filtered horse boxes in model coordinates and the transform back to the photo.
+func (e *Engine) detect(img image.Image) ([]Detection, letterboxParams, error) {
 	lr, err := letterboxTensor(img)
 	if err != nil {
 		return nil, letterboxParams{}, err
@@ -110,15 +118,25 @@ func (e *Engine) runInference(img image.Image) ([]float32, letterboxParams, erro
 		return nil, letterboxParams{}, fmt.Errorf("yolo: input tensor: %w", err)
 	}
 	defer in.Destroy()
-	out, err := ort.NewEmptyTensor[float32](ort.NewShape(1, numChannels, numAnchors))
-	if err != nil {
-		return nil, letterboxParams{}, fmt.Errorf("yolo: output tensor: %w", err)
-	}
-	defer out.Destroy()
-	if err := e.session.Run([]ort.Value{in}, []ort.Value{out}); err != nil {
+	outputs := make([]ort.Value, 1)
+	if err := e.session.Run([]ort.Value{in}, outputs); err != nil {
 		return nil, letterboxParams{}, fmt.Errorf("yolo: run: %w", err)
 	}
-	return append([]float32(nil), out.GetData()...), lr.params, nil
+	defer outputs[0].Destroy()
+	out, ok := outputs[0].(*ort.Tensor[float32])
+	if !ok {
+		return nil, lr.params, fmt.Errorf("yolo: expected float32 detector output")
+	}
+	shape := out.GetShape()
+	switch {
+	case shape.Equals(ort.NewShape(1, numChannels, numAnchors)):
+		dets := decodeOutput(out.GetData(), horseClassID, e.cfg.ConfThreshold)
+		return nms(dets, e.cfg.IouThreshold), lr.params, nil
+	case shape.Equals(ort.NewShape(1, 300, 6)):
+		return decodeEndToEnd(out.GetData(), horseClassID, e.cfg.ConfThreshold), lr.params, nil
+	default:
+		return nil, lr.params, fmt.Errorf("yolo: unsupported detector output shape %v", shape)
+	}
 }
 
 // ExtractTraits: детекция лошади → кропы (корпус, голова) → предзаполнение
@@ -135,12 +153,10 @@ func (e *Engine) ExtractTraits(ctx context.Context, input inference.ImageInput) 
 	if err := e.ensureSession(); err != nil {
 		return inference.TraitResult{}, err
 	}
-	out, params, err := e.runInference(img)
+	dets, params, err := e.detect(img)
 	if err != nil {
 		return inference.TraitResult{}, err
 	}
-	dets := decodeOutput(out, horseClassID, e.cfg.ConfThreshold)
-	dets = nms(dets, e.cfg.IouThreshold)
 	if len(dets) == 0 {
 		return inference.TraitResult{}, fmt.Errorf("%w: class %d, conf %.2f", inference.ErrNoAnimalDetected, horseClassID, e.cfg.ConfThreshold)
 	}
@@ -153,7 +169,7 @@ func (e *Engine) ExtractTraits(ctx context.Context, input inference.ImageInput) 
 		return inference.TraitResult{}, err
 	}
 	return inference.TraitResult{
-		ModelVersion: ModelVersion,
+		ModelVersion: e.version,
 		Traits:       traits,
 		Confidence:   best.Confidence,
 	}, nil
@@ -190,11 +206,11 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 		}
 		rows = append(rows, InstanceEmbedding{Box: *region})
 	} else {
-		out, params, err := e.runInference(img)
+		dets, params, err := e.detect(img)
 		if err != nil {
 			return nil, err
 		}
-		for _, det := range nms(decodeOutput(out, horseClassID, e.cfg.ConfThreshold), e.cfg.IouThreshold) {
+		for _, det := range dets {
 			box := unletterbox(det.Box, params)
 			if box.Empty() {
 				continue
@@ -231,20 +247,24 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 				}
 			}
 		} else {
-			row.Embedding = inference.EmbeddingResult{ModelVersion: ModelVersion, Vector: poolEmbedding(makeCrops(img, row.Box).Body)}
+			row.Embedding = inference.EmbeddingResult{ModelVersion: e.version, Vector: poolEmbedding(makeCrops(img, row.Box).Body)}
 		}
 	}
 	return rows, nil
 }
 
-// Annotation failures are recorded on the instance and leave its visual prediction usable.
 func (e *Engine) measureInstance(ctx context.Context, img image.Image, row *InstanceEmbedding) {
 	e.segmentOnce.Do(func() { e.segmenter, e.segmentErr = reid.OpenSegmenter(e.cfg.ReIDModelDir) })
 	if e.segmentErr != nil {
 		row.MeasurementError = e.segmentErr.Error()
 		return
 	}
-	traits, mask, err := e.segmenter.Measure(ctx, img, row.Box, e.cfg.IncludeMasks)
+	region, err := e.segmenter.Region(ctx, img, row.Box, true)
+	if err != nil {
+		row.MeasurementError = err.Error()
+		return
+	}
+	traits, mask, err := region.Measure(e.cfg.IncludeMasks)
 	if err != nil {
 		row.MeasurementError = err.Error()
 		return
