@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -269,8 +270,10 @@ func (c *Config) Validate() error {
 	switch c.Inference.Engine {
 	case "unavailable", "reference":
 	case "yolo":
+		// ModelPath без env — дефолт DataDir/models/yolov8n.onnx (веса
+		// не запечены в образ, качаются менеджером на постоянный том).
 		if c.Inference.ModelPath == "" {
-			return fmt.Errorf("config: inference.engine yolo: требуется inference.model_path")
+			c.Inference.ModelPath = filepath.Join(c.Node.DataDir, "models", "yolov8n.onnx")
 		}
 		if c.Inference.RuntimeLib == "" {
 			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
