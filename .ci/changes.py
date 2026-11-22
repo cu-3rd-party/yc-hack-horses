@@ -12,8 +12,8 @@ BACKEND_FILES = {
     "backend/go.sum",
 }
 BACKEND_DIRS = ("backend/cmd/", "backend/internal/", "backend/migrations/", "backend/api/")
-# Клиенты не деплоятся в self-service — только собираются в CI как проверка/артефакт.
-FRONTEND_FILES = set()
+WEB_FILES = {"app/index.html", "app/package.json", "app/package-lock.json", "app/tsconfig.json", "app/vite.config.ts"}
+WEB_DIRS = ("app/src/", "app/public/", "packages/contracts/src/")
 FRONTEND_DIRS = ("app/", "packages/")
 # Changes to the build pipeline itself must also be validated by building images.
 COMMON_FILES = {".forgejo/workflows/ci.yml", ".ci/changes.py"}
@@ -21,9 +21,12 @@ COMMON_FILES = {".forgejo/workflows/ci.yml", ".ci/changes.py"}
 
 def components(paths: list[str]) -> dict[str, bool]:
     common = any(path in COMMON_FILES for path in paths)
+    backend = common or any(path in BACKEND_FILES or path.startswith(BACKEND_DIRS) for path in paths)
+    web = any(path in WEB_FILES or path.startswith(WEB_DIRS) for path in paths)
     return {
-        "backend": common or any(path in BACKEND_FILES or path.startswith(BACKEND_DIRS) for path in paths),
-        "frontend": common or any(path in FRONTEND_FILES or path.startswith(FRONTEND_DIRS) for path in paths),
+        "image": backend or web or ".ci/smoke-web.mjs" in paths,
+        "backend": backend,
+        "frontend": common or any(path.startswith(FRONTEND_DIRS) for path in paths),
     }
 
 

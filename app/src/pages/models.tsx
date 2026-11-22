@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, Download, Link2 } from 'lucide-react';
-import { getModels, updateModel, type ModelFile, type ModelSetup } from '../journal/node';
+import { desktop, getModels, updateModel, type ModelFile, type ModelSetup } from '../journal/node';
 import { Button } from '../shared/ui/button';
 
 const key = ['recognition-models'];
@@ -145,7 +145,9 @@ export function ModelPanel({ setup }: { setup: ModelSetup }) {
   return (
     <section className="model-panel" aria-label="Модели распознавания">
       <h2>Модели распознавания</h2>
-      {setup.mode === 'disabled' ? (
+      {!desktop ? (
+        <p role="status">{setup.ready ? 'Сервер готов к распознаванию.' : 'Распознавание на сервере недоступно. Попробовать сравнение можно в демосценариях в настройках.'}</p>
+      ) : setup.mode === 'disabled' ? (
         <p>Распознавание выключено на этой ноде.</p>
       ) : (
         <>

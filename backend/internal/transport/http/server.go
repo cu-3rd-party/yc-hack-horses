@@ -49,6 +49,7 @@ type Deps struct {
 	// DocsEnabled — включить Scalar UI (/api/scalar) и OpenAPI-спеку.
 	// Включается только на central-ноде (api.docs_enabled / API_DOCS_ENABLED).
 	DocsEnabled bool
+	WebDir      string
 }
 
 // NewRouter собирает chi-роутер со всеми маршрутами v1.
@@ -67,6 +68,14 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.RealIP)
 	r.Use(requestLogger)
 	r.Use(middleware.Recoverer)
+
+	if d.WebDir != "" {
+		files := http.FileServer(http.Dir(d.WebDir))
+		for _, route := range []string{"/", "/assets/{file}", "/photos/{file}", "/licenses/{file}"} {
+			r.Get(route, files.ServeHTTP)
+			r.Head(route, files.ServeHTTP)
+		}
+	}
 
 	r.Get("/health", handleHealth)
 	r.Get("/readyz", handleReady(d))

@@ -10,12 +10,14 @@
   "scripts": {
     "dev": "vite",
     "start": "npm run build && electron .",
-    "build": "tsc -b && vite build && tsc -p tsconfig.electron.json && node scripts/electron-cjs.cjs",
+    "build:web": "tsc -b && vite build",
+    "build": "npm run build:web && tsc -p tsconfig.electron.json && node scripts/electron-cjs.cjs",
     "test": "vitest run",
     "lint": "eslint src",
     "package:mac": "npm run build && electron-builder --mac dir --arm64",
     "package:linux": "npm run build && electron-builder --linux AppImage deb",
     "test:go-comparison": "node tests/go-comparison.mjs",
+    "test:web": "node tests/web.mjs",
     "test:desktop": "node tests/desktop.mjs && node tests/node-mode.mjs"
   },
   "devDependencies": {

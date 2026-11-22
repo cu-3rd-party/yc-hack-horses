@@ -43,6 +43,7 @@ api:
   # Документация REST API (Scalar UI на /api/scalar + openapi.yaml).
   # Включать только на central-ноде (self-service деплой); локальные ноды — false.
   docs_enabled: false
+  # web_dir: "/app/web"  # Статика журнала; в серверном образе задано через WEB_DIR.
 
 inference:
   comparison_url: ""       # при engine: yolo пустое значение включает локальное сравнение; URL выбирает внешний сервис

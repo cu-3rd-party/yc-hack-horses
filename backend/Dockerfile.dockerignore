@@ -1,0 +1,17 @@
+**
+!backend/go.mod
+!backend/go.sum
+!backend/api/**
+!backend/cmd/**
+!backend/internal/**
+!backend/migrations/**
+!packages/contracts/src/**
+!app/package.json
+!app/package-lock.json
+!app/index.html
+!app/tsconfig.json
+!app/vite.config.ts
+!app/src/**
+!app/public/photos/*.jpg
+!app/public/licenses/*.txt
+**/.DS_Store

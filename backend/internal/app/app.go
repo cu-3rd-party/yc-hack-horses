@@ -222,6 +222,7 @@ func New(cfg *config.Config) (*App, error) {
 		ComparisonModel: comparisonModel,
 		Models:          assets, ModelMode: modelMode, RuntimePath: cfg.Inference.RuntimeLib,
 		DocsEnabled: cfg.Api.DocsEnabled,
+		WebDir:      cfg.Api.WebDir,
 		Enrollment:  enrollSvc,
 	})
 	srvHandler := http.Handler(handler)

@@ -22,7 +22,8 @@ import {
 } from './types';
 
 const root = '/api/v1';
-const unavailable = 'Локальная нода недоступна';
+export const desktop = globalThis.location?.protocol === 'journal:';
+const unavailable = desktop ? 'Локальная нода недоступна' : 'Сервер журнала недоступен';
 class NodeError extends Error {
   constructor(
     readonly status: number,
@@ -56,7 +57,7 @@ async function request<T>(
     const error = await response.json().catch(() => null);
     throw new NodeError(
       response.status,
-      error?.message || 'Ошибка запроса к локальной ноде.',
+      error?.message || 'Ошибка запроса к ноде журнала.',
       error?.code,
     );
   }
