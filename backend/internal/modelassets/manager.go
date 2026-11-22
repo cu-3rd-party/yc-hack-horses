@@ -61,15 +61,32 @@ type Manager struct {
 	client    *http.Client
 }
 
-func New(detector, dir, baseURL string, installed func()) *Manager {
+// newManager создаёт менеджер с общим HTTP-клиентом (таймаут и ограничение
+// редиректов на HTTPS). Набор артефактов добавляет вызывающий конструктор.
+func newManager(installed func()) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{Timeout: 2 * time.Hour,
+	return &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{Timeout: 2 * time.Hour,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" || len(via) > 8 {
 				return fmt.Errorf("invalid redirect")
 			}
 			return nil
 		}}}
+}
+
+// launch запускает фоновую проверку уже установленных файлов.
+func (m *Manager) launch() {
+	m.jobs.Add(1)
+	go func() {
+		defer m.jobs.Done()
+		for _, a := range m.files {
+			m.check(a)
+		}
+	}()
+}
+
+func New(detector, dir, baseURL string, installed func()) *Manager {
+	m := newManager(installed)
 	for _, spec := range []struct {
 		id, name, sha, origin string
 		size                  int64
@@ -99,13 +116,28 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 		a := &artifact{Status: Status{ID: spec.id, Filename: spec.name, State: "checking", HasSource: source != "", Size: spec.size}, modelFile: modelFile{path, spec.sha}, alternative: alternative, source: source}
 		m.files = append(m.files, a)
 	}
-	m.jobs.Add(1)
-	go func() {
-		defer m.jobs.Done()
-		for _, a := range m.files {
-			m.check(a)
+	m.launch()
+	return m
+}
+
+// NewHorseID собирает менеджер артефактов ReID-пайплайна horseid
+// (HANDOFF_GO.md): три ONNX-модели (yolo11s, ViTPose+, DINOv2-B) и обученные
+// веса голов/банка (heads_*/gallery_*.f32 + gallery.json/meta.json). Все файлы
+// кладутся в dir (inference.reid_model_dir). ONNX-бинарники вне git и велики —
+// качаются с базового URL выпуска (INFER_MODEL_BASE_URL); веса голов/банка
+// доставляются тем же путём, чтобы прод-контейнеру не требовался git.
+func NewHorseID(dir, baseURL string, installed func()) *Manager {
+	m := newManager(installed)
+	for _, spec := range horseIDArtifacts() {
+		path := filepath.Join(dir, spec.name)
+		source := spec.origin
+		if baseURL != "" {
+			source = strings.TrimRight(baseURL, "/") + "/" + spec.name
 		}
-	}()
+		a := &artifact{Status: Status{ID: spec.id, Filename: spec.name, State: "checking", HasSource: source != "", Size: spec.size}, modelFile: modelFile{path, spec.sha}, source: source}
+		m.files = append(m.files, a)
+	}
+	m.launch()
 	return m
 }
 func (m *Manager) check(a *artifact) {

@@ -30,6 +30,8 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/enroll"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid/horseid"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid/vitpose"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
@@ -192,6 +194,33 @@ func New(cfg *config.Config) (*App, error) {
 			}
 		}
 		a.addStop(func() { _ = detector.Close() })
+	case "horseid":
+		// Движок horseid (HANDOFF_GO.md): YOLO11s + ViTPose+ + DINOv2-B/ArcFace,
+		// вектор дескриптора concat(head256, body256) версии horseid.Version.
+		// ONNX-модели и веса голов/банка лежат вне git в reid_model_dir.
+		reidDir := cfg.Inference.ReIDModelDir
+		if reidDir == "" {
+			reidDir = filepath.Join(cfg.Node.DataDir, "models")
+		}
+		analyzer, closeHorseID, err := buildHorseID(cfg, reidDir)
+		if err != nil {
+			// Волна 2 (конструкторы детектора боксов и эмбеддера) ещё не влита:
+			// нода работает без локального сравнения, но качает модели (ниже).
+			slog.Warn("inference: horseid не скомпонован", "err", err)
+		} else {
+			comparisonModel = analyzer
+			a.addStop(closeHorseID)
+		}
+		if cfg.Inference.ComparisonURL == "" {
+			modelMode = "local"
+			host, _, _ := net.SplitHostPort(cfg.Network.ListenAddr)
+			// Менеджер моделей доступен и на wildcard-хосте центральной ноды
+			// (см. кейс yolo): иначе /api/v1/models навсегда готов=false.
+			if ip := net.ParseIP(host); host == "localhost" || host == "" || host == "0.0.0.0" || host == "::" || (ip != nil && ip.IsLoopback()) {
+				assets = modelassets.NewHorseID(reidDir, cfg.Inference.ModelBaseURL, nil)
+				a.addStop(assets.Close)
+			}
+		}
 	}
 	if cfg.Inference.ComparisonURL != "" {
 		modelMode = "external"
@@ -254,6 +283,28 @@ func New(cfg *config.Config) (*App, error) {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return a, nil
+}
+
+// buildHorseID собирает comparison.Analyzer пайплайна horseid (HANDOFF_GO.md):
+// детектор боксов YOLO11s (модуль M2), оценщик позы ViTPose+ (модуль M3) и
+// эмбеддер DINOv2-B + ArcFace (модуль M5). Возвращает анализатор и функцию
+// остановки ресурсов.
+//
+// Конструктор оценщика позы уже влит (vitpose.New). Конструкторы детектора
+// боксов (реализует horseid.BoxDetector поверх ONNX-сессии YOLO11s и класса 17
+// horse) и эмбеддера (реализует horseid.Embedder поверх DINOv2-B и проекций
+// ArcFace) появятся в волне 2; до их мёржа пайплайн не собирается, и функция
+// возвращает ошибку с версией контракта. После мёржа заменить тело на:
+//
+//	boxes := horseid.NewBoxDetector(cfg.Inference.ModelPath, cfg.Inference.RuntimeLib)
+//	pose := vitpose.New(cfg.Inference.RuntimeLib, reidDir, modelassets.VitPoseONNX)
+//	embed := horseid.NewEmbedder(reidDir)
+//	return comparison.NewHorseAnalyzer(boxes, pose, embed), func() { _ = pose.Close() }, nil
+func buildHorseID(cfg *config.Config, reidDir string) (comparison.Analyzer, func(), error) {
+	// Оценщик позы ViTPose+ нужен пайплайну horseid: конструктор модели.
+	pose := vitpose.New(cfg.Inference.RuntimeLib, reidDir, modelassets.VitPoseONNX)
+	closeAll := func() { _ = pose.Close() }
+	return nil, closeAll, fmt.Errorf("horseid: детектор боксов YOLO11s и эмбеддер ArcFace ещё не влиты (контракт %s)", horseid.Version)
 }
 
 // blobStatsSnapshot — срез состояния блобов для /api/v1/node: сколько ссылок

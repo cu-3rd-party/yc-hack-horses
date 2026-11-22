@@ -46,10 +46,17 @@ api:
   # web_dir: "/app/web"  # Статика журнала; в серверном образе задано через WEB_DIR.
 
 inference:
-  comparison_url: ""       # при engine: yolo пустое значение включает локальное сравнение; URL выбирает внешний сервис
-  engine: "unavailable"     # unavailable | reference | yolo (ADR-0012)
+  comparison_url: ""       # при engine: yolo|horseid пустое значение включает локальное сравнение; URL выбирает внешний сервис
+  engine: "unavailable"     # unavailable | reference | yolo | horseid (ADR-0012)
   # engine: yolo — детекция лошади YOLO ONNX + кропы; веса НЕ в git:
   # bash infra/scripts/download-yolo-model.sh
   # model_path: "infra/models/yolov8n.onnx"
   # runtime_lib: "infra/models/libonnxruntime.so.1.31.1"
   # reid_model_dir: "infra/models/reid-v1"  # поиск по MegaDescriptor-L-384, измерения по маскам для просмотра
+  # engine: horseid — ReID-пайплайн v2 (YOLO11s + ViTPose+ + DINOv2-B/ArcFace,
+  # HANDOFF_GO.md). model_path — yolo11s.onnx, reid_model_dir — vitpose, dinov2
+  # и обученные веса голов/банка (heads_*/gallery_*.f32, gallery.json, meta.json).
+  # Артефакты вне git; базовый URL выпуска задаёт INFER_MODEL_BASE_URL.
+  # model_path: "/app/models/yolo11s.onnx"
+  # runtime_lib: "/app/models/libonnxruntime.so.1.31.1"
+  # reid_model_dir: "/app/models"

@@ -166,3 +166,26 @@ func TestPartHeadsDownloadFromKaggleAndSurviveRestart(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestHorseIDCatalogPinsArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	m := NewHorseID(dir, "", nil)
+	t.Cleanup(m.Close)
+	require.Eventually(t, func() bool { return m.Status()[0].State != "checking" }, time.Second, time.Millisecond)
+	st := m.Status()
+	require.Len(t, st, 9, "три ONNX + четыре f32 + два json")
+	require.Equal(t, "yolo11s", st[0].ID)
+	require.Equal(t, Yolo11sSHA, m.find("yolo11s").sha)
+	require.Equal(t, filepath.Join(dir, Yolo11sONNX), m.find("yolo11s").path)
+	require.Equal(t, filepath.Join(dir, VitPoseONNX), m.find("vitpose").path)
+	require.Equal(t, filepath.Join(dir, GalleryBodyF32), m.find("gallery-dinov2-body").path)
+	require.Equal(t, reidModelsReleaseURL+"/"+GalleryJSON, m.find("gallery-json").source)
+	require.EqualValues(t, 501965660, m.find("vitpose").Status.Size)
+
+	// INFER_MODEL_BASE_URL переопределяет источник для всех файлов.
+	mirror := NewHorseID(dir, "https://mirror.example/reid/", nil)
+	t.Cleanup(mirror.Close)
+	require.Eventually(t, func() bool { return mirror.Status()[0].State != "checking" }, time.Second, time.Millisecond)
+	require.Equal(t, "https://mirror.example/reid/"+MetaJSON, mirror.find("meta-json").source)
+	require.Equal(t, "https://mirror.example/reid/"+Yolo11sONNX, mirror.find("yolo11s").source)
+}
