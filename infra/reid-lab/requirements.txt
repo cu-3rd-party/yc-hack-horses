@@ -1,0 +1,10 @@
+torch
+torchvision
+timm
+ultralytics
+transformers
+huggingface_hub
+safetensors
+pillow
+numpy
+scikit-learn
