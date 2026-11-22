@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# rebuild: delivery retry after transient runner failures
 # Мультистейдж. Вариант central (self-service): CGO-сборка + YOLO/onnxruntime в образе,
 # чтобы серверное распознавание работало (запрос пользователя 2026-11-22; отступление
 # от ADR-0012 «CGO-free central» — там деградация была сознательной, здесь осознанно включаем).
