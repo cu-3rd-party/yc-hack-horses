@@ -45,6 +45,11 @@ func TestSampleRGB(t *testing.T) {
 	almost(t, "oob-bottom", rgb[0], 0, 1e-9)
 	rgb = sampleRGB(buf, 3, 2, 2.0, 1.0)
 	almost(t, "right-edge", rgb[0], 50, 1e-9) // (1*3+2)*10
+	// NaN/Inf -> нулевой отсчёт (как cval в scipy), без паники на индексации
+	rgb = sampleRGB(buf, 3, 2, math.NaN(), 0)
+	almost(t, "nan", rgb[0], 0, 1e-9)
+	rgb = sampleRGB(buf, 3, 2, math.Inf(1), 0)
+	almost(t, "inf", rgb[0], 0, 1e-9)
 }
 
 // synthImage — детерминированное изображение (та же формула, что в эталонном генераторе).

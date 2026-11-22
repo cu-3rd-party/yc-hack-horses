@@ -31,13 +31,25 @@ func TestDecodeSymmetricPeak(t *testing.T) {
 		}
 	}
 	box := [4]float64{60, 40, 210, 160}
-	kps := decode(heat, box)
+	kps, err := decode(heat, box)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	center, scale := boxToCenterAndScale(60, 40, 150, 120)
 	wx, wy := transformPreds(px, py, center, scale, HeatmapWidth, HeatmapHeight)
 	for kp := 0; kp < NumKeypoints; kp++ {
 		almost(t, "peak.x", kps[kp].X, wx, 0.05)
 		almost(t, "peak.y", kps[kp].Y, wy, 0.05)
 		almost(t, "peak.score", kps[kp].Score, 1.0, 1e-6)
+	}
+}
+
+// TestDecodeBadLength: тепмапы неверной длины -> ошибка (раньше был бы panic).
+func TestDecodeBadLength(t *testing.T) {
+	for _, n := range []int{0, NumKeypoints*HeatmapHeight*HeatmapWidth - 1, NumKeypoints*HeatmapHeight*HeatmapWidth + 1} {
+		if _, err := decode(make([]float32, n), [4]float64{0, 0, 10, 10}); err == nil {
+			t.Errorf("decode(len=%d): ожидалась ошибка", n)
+		}
 	}
 }
 
@@ -57,7 +69,10 @@ func TestDecodeGolden(t *testing.T) {
 			}
 		}
 	}
-	kps := decode(heat, [4]float64{60, 40, 210, 160})
+	kps, err := decode(heat, [4]float64{60, 40, 210, 160})
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	golden := []struct{ x, y, score float64 }{
 		{57.21104431152344, -5.156951904296875, 1.0013021230697632},
 		{77.15785217285156, 6.747802734375, 1.0026249885559082},
