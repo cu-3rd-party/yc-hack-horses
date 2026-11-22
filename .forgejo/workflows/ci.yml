@@ -167,21 +167,29 @@ jobs:
           IMAGE: git.cu3rd.ru/cu3rd/yc-hack-horses-data:${{ github.sha }}
         run: |
           set -eu
-          docker build --cpuset-cpus 0-3 --memory 4g -f infra/data-nginx/Dockerfile -t "$IMAGE" infra/data-nginx
-          # смок: автоиндекс каталога и запрет dotfiles (busybox wget, curl нет)
+          docker version --format 'daemon {{.Server.Version}}'
+          docker build --provenance=false --sbom=false --cpuset-cpus 0-3 --memory 4g -f infra/data-nginx/Dockerfile -t "$IMAGE" infra/data-nginx
+          # смок: автоиндекс каталога и запрет dotfiles (busybox wget, curl нет).
           # имя уникально для прогона: контейнер от упавшего прошлого прогона
-          # остаётся на демоне раннера (trap не срабатывает при kill джобы)
+          # остаётся на демоне раннера (trap не срабатывает при kill джобы).
+          # эхо перед каждым шагом: без него падение под set -e немое.
           smoke="data-smoke-${{ github.run_id }}"
+          echo "smoke=$smoke"
           docker rm -fv "$smoke" >/dev/null 2>&1 || true
-          docker run -d --name "$smoke" "$IMAGE" >/dev/null
+          docker run -d --name "$smoke" "$IMAGE"
           trap 'docker rm -fv "$smoke" >/dev/null' EXIT
+          echo "smoke started"
           docker exec "$smoke" mkdir -p /data/sub /data/.hidden
           docker exec "$smoke" sh -c 'echo hi > /data/sub/f.txt; echo secret > /data/.hidden/token'
           code=$(docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/ 2>&1 | awk '/^  HTTP/{print $2}' | tail -1)
+          echo "index code=$code"
           [ "$code" = 200 ] || { echo "index code $code"; exit 1; }
           docker exec "$smoke" wget -q -O - http://127.0.0.1:8080/ | grep -q 'sub/' || { echo 'no autoindex'; exit 1; }
+          echo "autoindex ok"
           code=$(docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/.hidden/token 2>&1 | awk '/^  HTTP/{print $2}' | tail -1)
+          echo "dotfile code=$code"
           [ "$code" = 403 ] || { echo "dotfile code $code"; exit 1; }
+          echo "dotfile ok"
       - name: Publish static image
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         env:
