@@ -2,7 +2,6 @@ package horseid
 
 import (
 	"bytes"
-	"context"
 	"image"
 	"image/color"
 	"image/png"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 )
 
@@ -171,37 +169,4 @@ func TestPipelineInvalidImage(t *testing.T) {
 	p := &horsePipeline{boxes: fakeBoxes{}, pose: fakePose{}, embed: &fakeEmbedder{}}
 	_, err := p.Analyze([]byte("not an image"))
 	require.ErrorIs(t, err, inference.ErrInvalidImage)
-}
-
-// TestHorseAnalyzerPrediction — адаптер comparison: один Prediction с версией
-// horseid и 512-мерным вектором; отсутствие лошади пробрасывает
-// inference.ErrNoAnimalDetected.
-func TestHorseAnalyzerPrediction(t *testing.T) {
-	emb := &fakeEmbedder{head: filled(EmbedDim, 1), body: filled(EmbedDim, 2)}
-	a := HorseAnalyzer{pipeline: &horsePipeline{
-		boxes: fakeBoxes{boxes: []Box{{Box: [4]float64{20, 20, 180, 180}, Confidence: 0.75}}},
-		pose:  fakePose{kps: keypointsWithHead()},
-		embed: emb,
-	}}
-
-	preds, err := a.Analyze(context.Background(), samplePNG(t, 200, 200), "image/png")
-	require.NoError(t, err)
-	require.Len(t, preds, 1)
-	require.Equal(t, 0.75, preds[0].Confidence)
-	require.Equal(t, Version, preds[0].Descriptor.Version)
-	require.Len(t, preds[0].Descriptor.Vector, 2*EmbedDim)
-
-	nothing := HorseAnalyzer{pipeline: &horsePipeline{
-		boxes: fakeBoxes{},
-		pose:  fakePose{kps: keypointsWithHead()},
-		embed: &fakeEmbedder{},
-	}}
-	_, err = nothing.Analyze(context.Background(), samplePNG(t, 200, 200), "image/png")
-	require.ErrorIs(t, err, inference.ErrNoAnimalDetected)
-}
-
-// TestNewHorseAnalyzerSatisfiesAnalyzer — конструктор отдаёт рабочий адаптер.
-func TestNewHorseAnalyzerSatisfiesAnalyzer(t *testing.T) {
-	var analyzer comparison.Analyzer = NewHorseAnalyzer(fakeBoxes{}, fakePose{}, &fakeEmbedder{})
-	require.NotNil(t, analyzer)
 }

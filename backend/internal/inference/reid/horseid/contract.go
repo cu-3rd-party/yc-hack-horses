@@ -94,4 +94,6 @@ type Embedder interface {
 type Pipeline interface {
 	Detector
 	Embedder
+	// Analyze — полный проход: детекция, кропы, эмбеддинги, Result.
+	Analyze(data []byte) (Result, error)
 }
