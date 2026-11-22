@@ -290,3 +290,85 @@ func TestInferenceEngineUnavailable(t *testing.T) {
 		t.Fatalf("body must explain model unavailable: %s", res.Body.String())
 	}
 }
+
+// uniqueInferencePNG — валидное изображение, детерминированное, но уникальное
+// для теста (цвет выводится из имени теста): другой sha256 изолирует тест от
+// снимков и наблюдений соседних тестов, использующих inferenceImagePNG.
+func uniqueInferencePNG(t *testing.T) []byte {
+	t.Helper()
+	sum := sha256.Sum256([]byte(t.Name()))
+	img := image.NewRGBA(image.Rect(0, 0, 120, 240))
+	for y := 0; y < 240; y++ {
+		for x := 0; x < 120; x++ {
+			img.SetRGBA(x, y, color.RGBA{
+				R: uint8((int(sum[0]) + x) % 256),
+				G: uint8((int(sum[1]) + y) % 256),
+				B: uint8((int(sum[2]) + x + y) % 256),
+				A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// После delete -> ре-аплоад блоба (без нового снимка) поиск похожих по этому
+// блобу отдаёт 404: старый снимок привязан к инвалидированному наблюдению и
+// выпадает из поиска, а нового снимка нет. Поведение закреплено как ожидаемое.
+func TestInferenceSimilarAfterDeleteReupload(t *testing.T) {
+	content := uniqueInferencePNG(t)
+	sha := uploadInferenceBlob(t, content)
+	obsID := createObservationForBlob(t, sha)
+
+	// снимок привязан к наблюдению и подтверждён человеком
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/inference/traits",
+		strings.NewReader(`{"blob_id":"`+sha+`","observation_id":"`+obsID+`"}`))
+	res := httptest.NewRecorder()
+	testRoutes.ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("predict: status %d: %s", res.Code, res.Body.String())
+	}
+	var pred struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &pred); err != nil {
+		t.Fatal(err)
+	}
+	req2 := httptest.NewRequest(http.MethodPatch, "/api/v1/trait_snapshots/"+pred.ID,
+		strings.NewReader(`{"traits":{"coat":"bay","muzzle":"light"}}`))
+	res2 := httptest.NewRecorder()
+	testRoutes.ServeHTTP(res2, req2)
+	if res2.Code != http.StatusOK {
+		t.Fatalf("confirm: status %d: %s", res2.Code, res2.Body.String())
+	}
+
+	// до удаления поиск похожих работает
+	req3 := httptest.NewRequest(http.MethodGet, "/api/v1/inference/similar?blob_id="+sha, nil)
+	res3 := httptest.NewRecorder()
+	testRoutes.ServeHTTP(res3, req3)
+	if res3.Code != http.StatusOK {
+		t.Fatalf("similar before delete: status %d: %s", res3.Code, res3.Body.String())
+	}
+
+	// удаляем блоб и ре-аплоадим тот же файл (revive), без нового снимка
+	del := httptest.NewRequest(http.MethodDelete, "/api/v1/blobs/"+sha, nil)
+	dres := httptest.NewRecorder()
+	testRoutes.ServeHTTP(dres, del)
+	if dres.Code != http.StatusNoContent {
+		t.Fatalf("delete: status %d: %s", dres.Code, dres.Body.String())
+	}
+	if again := uploadInferenceBlob(t, content); again != sha {
+		t.Fatalf("reupload sha = %s, want %s", again, sha)
+	}
+
+	// similar по блобу без нового снимка — 404
+	req4 := httptest.NewRequest(http.MethodGet, "/api/v1/inference/similar?blob_id="+sha, nil)
+	res4 := httptest.NewRecorder()
+	testRoutes.ServeHTTP(res4, req4)
+	if res4.Code != http.StatusNotFound {
+		t.Fatalf("similar after delete+reupload: want 404, got %d: %s", res4.Code, res4.Body.String())
+	}
+}

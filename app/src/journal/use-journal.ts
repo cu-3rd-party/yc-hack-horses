@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { command, getBook } from './api';
+import { command, getBook, type PassportInput } from './api';
 import { useDemo } from './mode';
 import {
   analyze,
@@ -8,6 +8,7 @@ import {
   getHorseHistory,
   getNodeBook,
   saveManual,
+  uploadNodePassport,
 } from './node';
 import type { AnalysisInput, Decision, ManualInput, Notebook, Review } from './types';
 
@@ -49,7 +50,7 @@ export function useCommand<K extends Parameters<typeof command>[0]>(route: K) {
       if (demo) {
         const book = await command(route, input);
         cache.setQueryData(key(true), book);
-        return;
+        return route === '/analysis' ? book.review ?? undefined : undefined;
       }
       switch (route) {
         case '/analysis': {
@@ -79,6 +80,17 @@ export function useCommand<K extends Parameters<typeof command>[0]>(route: K) {
         case '/manual':
           await saveManual(input as ManualInput);
           break;
+        case '/passport': {
+          const upload = input as PassportInput;
+          const result = await uploadNodePassport(upload.horseId, upload);
+          cache.setQueryData<Notebook>(key(false), (book) => book && ({
+            ...book,
+            horses: book.horses.map(horse => horse.id === result.id
+              ? { ...horse, passportSha256: result.metadata.passport_sha256 }
+              : horse),
+          }));
+          return;
+        }
         default:
           throw new Error('Действие доступно в деморежиме.');
       }

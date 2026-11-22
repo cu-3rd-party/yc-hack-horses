@@ -1,3 +1,4 @@
+import type { Horse, HorseMetadata, HorsePassportUpload } from '../../../packages/contracts/src';
 import type {
   CancelResult,
   ComparisonDecision,
@@ -22,6 +23,21 @@ import {
 } from './types';
 
 const root = '/api/v1';
+const passportPath = (id: string) => '/horses/' + encodeURIComponent(id) + '/passport';
+
+export async function readNodePassport(id: string, signal: AbortSignal) {
+  const response = await fetch(root + passportPath(id), { signal, cache: 'no-cache' });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error('Не удалось загрузить паспорт.');
+  return response.blob();
+}
+
+export function uploadNodePassport(id: string, { file, studbook_number }: HorsePassportUpload) {
+  const form = new FormData();
+  form.append('file', file);
+  if (studbook_number) form.append('studbook_number', studbook_number);
+  return request<Horse>(passportPath(id), 'PUT', form);
+}
 export const desktop = globalThis.location?.protocol === 'journal:';
 const unavailable = desktop ? 'Локальная нода недоступна' : 'Сервер журнала недоступен';
 class NodeError extends Error {
@@ -140,6 +156,7 @@ function observation(row: NodeObservation, blobs: Map<string, string>): Observat
     name,
     horseId: row.horse_id || null,
     date: row.observed_at,
+    comment: row.comment,
     coordinates: row.location,
     observer: row.observer_id,
     photos: images,
@@ -153,7 +170,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
   });
   if (!node?.node_id || !node.driver) throw new Error(unavailable);
   const [horses, observations, blobs] = await Promise.all([
-    request<{ id: string; metadata?: { name?: string; nickname?: string } }[]>(
+    request<{ id: string; metadata?: HorseMetadata }[]>(
       '/horses',
       'GET',
       undefined,
@@ -173,6 +190,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
     horses: horses.map((h) => ({
       id: h.id,
       name: h.metadata?.name || h.metadata?.nickname || h.id,
+      passportSha256: h.metadata?.passport_sha256,
     })),
     observations: observations.map((o) => observation(o, hashes)),
     review: null,
@@ -245,14 +263,10 @@ export async function decide(input: Decision) {
     '/detections/' +
     encodeURIComponent(input.detectionId) +
     '/decision';
-  const body: ComparisonDecision =
-    input.horseId === null
-      ? {
-          action: 'create_horse',
-          horse_name: input.horseName!.trim(),
-          observation_name: input.name.trim(),
-        }
-      : { action: 'match', horse_id: input.horseId, observation_name: input.name.trim() };
+  const observation = { observation_name: input.name.trim(), comment: input.comment?.trim() || undefined };
+  const body: ComparisonDecision = input.horseId === null
+    ? { ...observation, action: 'create_horse', horse_name: input.horseName!.trim() }
+    : { ...observation, action: 'match', horse_id: input.horseId };
   return request<DecisionResult>(path, 'PUT', body);
 }
 export function cancelComparison(id: string) {
@@ -264,6 +278,7 @@ export async function saveManual(input: ManualInput) {
   for (const file of input.files) hashes.push(await upload(file));
   return request<NodeObservation>('/observations', 'POST', {
     observer_id: input.observer.trim(),
+    comment: input.comment?.trim() || undefined,
     location: input.coordinates.trim(),
     horse_id: input.horseId ?? undefined,
     blob_ids: hashes,

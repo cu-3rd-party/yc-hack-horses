@@ -8,11 +8,22 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 )
 
+// Reference — подтверждённое фото-эталон для ранжирования.
+// InvalidatedAt выставляет источник, знающий о мягком удалении фото
+// (blob.deleted): такие эталоны не участвуют в поиске. Единственный текущий
+// производитель Reference — sqlstore.References, который уже фильтрует по
+// invalidated_at; проверка в Rank — предохранитель defence-in-depth на случай
+// будущих источников. Иначе помеченный эталон мог бы победить по косинусу и
+// попасть в BestPhotoID, а клиент получил бы ссылку на несуществующий блоб.
 type Reference struct {
 	HorseID, Name, PhotoID, SHA string
 	NeedsCapture                bool
+	InvalidatedAt               *time.Time
 	Descriptor
 }
+
+// searchable сообщает, что эталон не помечен как удалённый.
+func (r Reference) searchable() bool { return r.InvalidatedAt == nil }
 
 // unit returns a normalized vector, or nil for a missing/degenerate embedding.
 // Scaling before taking the norm avoids overflow for finite model outputs.
@@ -119,7 +130,7 @@ func Rank(query Descriptor, references []Reference, k int) []Candidate {
 	}
 	groups := map[string][]Reference{}
 	for _, r := range references {
-		if r.Version != query.Version || len(r.Vector) != len(q) {
+		if !r.searchable() || r.Version != query.Version || len(r.Vector) != len(q) {
 			continue
 		}
 		r.Vector = unit(r.Vector)

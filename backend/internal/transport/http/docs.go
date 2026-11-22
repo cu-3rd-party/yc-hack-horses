@@ -56,6 +56,7 @@ type pathItem struct {
 	Post      *operation `yaml:"post,omitempty"`
 	Put       *operation `yaml:"put,omitempty"`
 	Patch     *operation `yaml:"patch,omitempty"`
+	Delete    *operation `yaml:"delete,omitempty"`
 	WebSocket string     `yaml:"x-websocket,omitempty"`
 }
 
@@ -173,6 +174,8 @@ func buildOpenAPISpec() []byte {
 			item.Put = op
 		case "patch":
 			item.Patch = op
+		case "delete":
+			item.Delete = op
 		}
 		spec.Paths[path] = item
 		return op
@@ -197,6 +200,14 @@ func buildOpenAPISpec() []byte {
 		return parameter{
 			Name: name, In: "path", Required: true, Description: desc,
 			Schema: strSchema("UUID или sha256 — идентификатор ресурса"),
+		}
+	}
+	// sha256Param — path-параметр именно hex-sha256 содержимого блоба
+	// (не общий idParam: у /api/v1/blobs/{sha256} ключ строго sha256).
+	sha256Param := func(name, desc string) parameter {
+		return parameter{
+			Name: name, In: "path", Required: true, Description: desc,
+			Schema: strSchema("hex sha256 содержимого"),
 		}
 	}
 
@@ -247,6 +258,39 @@ func buildOpenAPISpec() []byte {
 		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
 	})
 
+	putPassport := add("/api/v1/horses/{id}/passport", "put", "Загрузить PDF-паспорт лошади", "putHorsePassport", "horses",
+		"multipart/form-data: file — PDF до 50 MiB (проверяется сигнатура %PDF-), studbook_number — номер "+
+			"по племкниге (опционально). Файл сохраняется как блоб, пишется событие horse.passport_attached, "+
+			"в metadata лошади появляются passport_sha256, passport_filename, passport_size, passport_attached_at "+
+			"и studbook_number. Повторная загрузка заменяет паспорт; паспорт синхронизируется на другие ноды.")
+	putPassport.Parameters = []parameter{idParam("id", "UUID лошади")}
+	putPassport.RequestBody = &requestBody{
+		Description: "Ровно один PDF в поле file. При ошибке прежний паспорт сохраняется.",
+		Required:    true,
+		Content: map[string]mediaTypeValue{
+			"multipart/form-data": {Schema: schemaNode{"type": "object", "required": []string{"file"}}.
+				prop("file", schemaNode{"type": "string", "format": "binary", "description": "PDF до 50 MiB"}).
+				prop("studbook_number", strSchema("номер по племенной книге, например 7706"))},
+		},
+	}
+	putPassport.Responses = merge(stdErrors(true), map[string]resp{
+		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
+		"400": {Description: "требуется multipart/form-data с одним файлом в поле file", Content: errorRef},
+		"413": {Description: "файл больше 50 MiB", Content: errorRef},
+		"415": {Description: "файл не PDF", Content: errorRef},
+	})
+
+	getPassport := add("/api/v1/horses/{id}/passport", "get", "Получить PDF-паспорт лошади", "getHorsePassport", "horses",
+		"Отдаёт PDF (application/pdf, Content-Disposition: inline) для просмотра в браузере; ETag = sha256. "+
+			"404 — лошади нет, паспорт не загружен или файл ещё не доехал по синку.")
+	getPassport.Parameters = []parameter{idParam("id", "UUID лошади")}
+	getPassport.Responses = merge(stdErrors(true), map[string]resp{
+		"200": {Description: "PDF-паспорт", Content: map[string]mediaTypeValue{
+			"application/pdf": {Schema: schemaNode{"type": "string", "format": "binary"}},
+		}},
+		"304": {Description: "не изменился (If-None-Match)"},
+	})
+
 	create := add("/api/v1/comparisons", "post", "Сравнить лошадей на снимке", "createComparison", "comparisons", "Каждая детекция имеет свою разметку и список особей по косинусному сходству.")
 	create.RequestBody = &requestBody{Required: true, Content: jsonContent(schemaRef("ComparisonRequest"))}
 	create.Responses = merge(stdErrors(true), map[string]resp{
@@ -270,8 +314,10 @@ func buildOpenAPISpec() []byte {
 	// --- observations ---
 	listObs := add("/api/v1/observations", "get", "Список наблюдений", "listObservations", "observations",
 		"Опциональный фильтр horse_id.")
-	listObs.Parameters = []parameter{{Name: "horse_id", In: "query", Schema: strSchema("UUID лошади, пусто — все")},
-		{Name: "include", In: "query", Schema: strSchema("photos,annotations — добавить фотографии и их разметку")}}
+	listObs.Parameters = []parameter{
+		{Name: "horse_id", In: "query", Schema: strSchema("UUID лошади, пусто — все")},
+		{Name: "include", In: "query", Schema: strSchema("photos,annotations — добавить фотографии и их разметку")},
+	}
 	listObs.Responses = map[string]resp{
 		"200": okJSON(schemaNode{"type": "array", "items": schemaNode{"$ref": "#/components/schemas/Observation"}}),
 	}
@@ -288,6 +334,14 @@ func buildOpenAPISpec() []byte {
 		"201": createdJSON(schemaNode{"$ref": "#/components/schemas/Observation"}),
 		"422": {Description: "observer_id отсутствует", Content: errorRef},
 	})
+
+	deleteObs := add("/api/v1/observations/{id}", "delete", "Удалить наблюдение (планируется)", "deleteObservation", "observations",
+		"Проект контракта. Маршрут ещё не реализован. Запрос принимает ID наблюдения в пути без тела.")
+	deleteObs.Parameters = []parameter{idParam("id", "UUID наблюдения")}
+	deleteObs.Responses = map[string]resp{
+		"204": {Description: "Наблюдение удалено, тело ответа пустое"},
+		"404": {Description: "Наблюдение отсутствует", Content: errorRef},
+	}
 
 	// --- blobs ---
 	listBlobs := add("/api/v1/blobs", "get", "Список блобов", "listBlobs", "blobs", "")
@@ -315,9 +369,25 @@ func buildOpenAPISpec() []byte {
 
 	getBlob := add("/api/v1/blobs/{sha256}", "get", "Получить блоб", "getBlob", "blobs",
 		"Отдаёт исходное содержимое с Content-Type из метаданных и ETag = sha256.")
-	getBlob.Parameters = []parameter{idParam("sha256", "hex-строка sha256 содержимого")}
+	getBlob.Parameters = []parameter{sha256Param("sha256", "hex sha256 содержимого")}
 	getBlob.Responses = merge(stdErrors(true), map[string]resp{
 		"200": {Description: "содержимое блоба (произвольный тип)"},
+	})
+
+	deleteBlobOp := add("/api/v1/blobs/{sha256}", "delete", "Удалить блоб", "deleteBlob", "blobs",
+		"Мягкое удаление событием blob.deleted: блоб перестаёт отдаваться (GET → 404), наблюдения с "+
+			"этим фото помечаются invalidated и выпадают из сравнения. Файл удаляется, только если на "+
+			"блоб не ссылается ни одно наблюдение. Повторная доставка события — no-op. Ре-аплоад того же "+
+			"файла (blob.registered) снова делает блоб доступным, но флаг invalidated у наблюдений НЕ сбрасывается. "+
+			"Инвалидация наблюдений и удержание файла срабатывают для обеих форм ссылок "+
+			"(blobs.id и sha256): ссылка по blobs.id (UUIDv7, канонический контракт) резолвится в sha256 через таблицу blobs.")
+	deleteBlobOp.Parameters = []parameter{
+		sha256Param("sha256", "hex sha256 содержимого"),
+		{Name: "reason", In: "query", Schema: strSchema("причина удаления — попадает в payload события")},
+	}
+	deleteBlobOp.Responses = merge(stdErrors(true), map[string]resp{
+		"204": {Description: "блоб удалён, событие blob.deleted записано"},
+		"404": {Description: "блоб не найден или уже удалён", Content: errorRef},
 	})
 
 	// --- node ---
@@ -389,11 +459,19 @@ func buildOpenAPISpec() []byte {
 		prop("node_id", strSchema("UUID ноды-источника")).
 		prop("observed_at", schemaNode{"type": "string", "format": "date-time"}).
 		prop("location", strSchema("текст или latlon")).
+		prop("comment", strSchema("Комментарий к наблюдению, опционально")).
 		prop("observer_id", strSchema("идентификатор наблюдателя")).
-		prop("blob_ids", schemaNode{"type": "array", "items": strSchema("blobs.id")}).
+		prop("blob_ids", schemaNode{
+			"type":        "array",
+			"description": "ссылки на блобы наблюдения: blobs.id (UUIDv7) — канонический контракт (OpenAPI); поддержана и форма sha256 (legacy/серверные пути). Ссылка по blobs.id резолвится в sha256 через таблицу blobs.",
+			"items":       strSchema("blobs.id (UUIDv7, канонический контракт) либо hex sha256 (поддерживаемая альтернатива)"),
+		}).
 		prop("name", strSchema("Имя наблюдения")).
 		prop("photos", schemaArray(schemaRef("ObservationPhoto"))).
 		prop("trait_snapshot_id", strSchema("привязанный снимок признаков, опционально")).
+		prop("invalidated", schemaNode{"type": "boolean", "description": "фото наблюдения удалено (blob.deleted): запись устарела, вектора не участвуют в сравнении. Ре-аплоад блоба флаг не сбрасывает. Инвалидация срабатывает для обеих форм ссылок: blobs.id (UUIDv7, канонический контракт) и sha256; UUID резолвится в sha256 через таблицу blobs."}).
+		prop("invalidated_at", schemaNode{"type": "string", "format": "date-time", "description": "момент инвалидации (из deleted_at события blob.deleted)"}).
+		prop("invalidation_reason", strSchema("причина инвалидации, фактический формат: \"blob deleted: <sha256>\" либо \"blob deleted: <sha256> (<reason>)\" при указанном reason")).
 		required("id", "node_id", "observed_at", "location", "observer_id", "blob_ids")
 	schemas["Blob"] = schemaNode{"type": "object"}.
 		prop("id", strSchema("UUIDv7")).
@@ -432,8 +510,13 @@ func buildOpenAPISpec() []byte {
 		prop("horse_id", strSchema("опционально")).
 		prop("observed_at", schemaNode{"type": "string", "format": "date-time", "description": "пусто — текущее время"}).
 		prop("location", strSchema("текст/latlon")).
+		prop("comment", strSchema("Комментарий к наблюдению, опционально")).
 		prop("observer_id", strSchema("обязателен")).
-		prop("blob_ids", schemaNode{"type": "array", "items": strSchema("blobs.id")}).
+		prop("blob_ids", schemaNode{
+			"type":        "array",
+			"description": "ссылки на ранее загруженные блобы: blobs.id (UUIDv7) — канонический контракт (OpenAPI); поддержана и форма sha256 (legacy/серверные пути).",
+			"items":       strSchema("blobs.id (UUIDv7, канонический контракт) либо hex sha256 (поддерживаемая альтернатива)"),
+		}).
 		required("observer_id")
 	schemas["CreateTraitsRequest"] = schemaNode{"type": "object"}.
 		prop("blob_id", strSchema("blobs.id или sha256")).

@@ -64,8 +64,10 @@ func run() error {
 		if r.Capture == "" {
 			r.Capture = r.Day
 		}
-		refs = append(refs, comparison.Reference{HorseID: r.Name, Name: r.Name, PhotoID: r.SHA,
-			Descriptor: comparison.Descriptor{Version: r.Version, Vector: r.Vector, CaptureTime: r.Capture}})
+		refs = append(refs, comparison.Reference{
+			HorseID: r.Name, Name: r.Name, PhotoID: r.SHA,
+			Descriptor: comparison.Descriptor{Version: r.Version, Vector: r.Vector, CaptureTime: r.Capture},
+		})
 	}
 	dec, enc := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
 	for {
@@ -99,6 +101,7 @@ func run() error {
 		}
 	}
 }
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

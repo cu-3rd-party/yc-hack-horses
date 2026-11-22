@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Stage, Layer, Group, Line, Circle, Rect, Text } from 'react-konva';
 import { Aperture, FileText, Frame, ScanEye, Search, X, type LucideIcon } from 'lucide-react';
 import type { Annotation, Photo, Point } from '../../journal/types';
@@ -345,7 +345,9 @@ function PhotoFilter({
 export function PhotoGrid({
   photos,
   onSelect,
+  children,
 }: {
+  children?: ReactNode;
   photos: Photo[];
   onSelect: (photo: Photo) => void;
 }) {
@@ -410,6 +412,7 @@ export function PhotoGrid({
           </>
         )}
       </FilterBar>
+      {children}
       {visible.length ? (
         <div className="photo-grid">
           {visible.map((p) => (

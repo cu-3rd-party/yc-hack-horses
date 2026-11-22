@@ -1233,6 +1233,9 @@ option:checked > .option-check {
   border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
+.observation-comment {
+  white-space: pre-wrap;
+}
 .facts dt {
   color: var(--muted);
 }
@@ -1458,3 +1461,56 @@ option:checked > .option-check {
   .model-meter > span { background: Highlight; forced-color-adjust: none; }
 }
 .model-row [role=alert] { margin-block: 8px 0; color: var(--error); }
+
+.passport-action {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: -8px 0 20px;
+}
+.passport-action button:disabled {
+  cursor: default;
+  background: var(--surface);
+}
+.passport-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.passport-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  margin-top: 14px;
+}
+.passport-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.passport-status, .passport-zoom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.passport-status {
+  position: absolute;
+  inset: 0;
+}
+.passport-zoom {
+  padding-top: 8px;
+  gap: 4px;
+}
+.passport-zoom button {
+  display: grid;
+  place-items: center;
+  min-height: 36px;
+  min-width: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+}
+.passport-zoom button:hover {
+  background: #353538;
+}

@@ -58,19 +58,23 @@ type Manager struct {
 	ctx       context.Context
 	stop      context.CancelFunc
 	jobs      sync.WaitGroup
+	checked   chan struct{}
+	autoOnce  sync.Once
 	installed func()
 	client    *http.Client
 }
 
 func New(detector, dir, baseURL string, installed func()) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{Timeout: 2 * time.Hour,
+	m := &Manager{ctx: ctx, stop: cancel, checked: make(chan struct{}), installed: installed, client: &http.Client{
+		Timeout: 2 * time.Hour,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" || len(via) > 8 {
 				return fmt.Errorf("invalid redirect")
 			}
 			return nil
-		}}}
+		},
+	}}
 	detectorName, detectorHash, detectorSize := legacyDetectorFile, DetectorSHA, int64(12851049)
 	if filepath.Base(detector) == defaultDetectorFile {
 		detectorName, detectorHash, detectorSize = defaultDetectorFile, detector26xSHA, 223287479
@@ -107,12 +111,42 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 	m.jobs.Add(1)
 	go func() {
 		defer m.jobs.Done()
+		defer close(m.checked)
 		for _, a := range m.files {
 			m.check(a)
 		}
 	}()
 	return m
 }
+
+// AutoDownload стартует загрузку отсутствующих артефактов из пинованных
+// источников. Вызывается приложением после New (в тестах — не вызывается,
+// чтобы тесты менеджера не ходили в сеть за весами).
+func (m *Manager) AutoDownload() {
+	m.autoOnce.Do(func() {
+		m.mu.Lock()
+		if m.ctx.Err() != nil {
+			m.mu.Unlock()
+			return
+		}
+		m.jobs.Add(1)
+		m.mu.Unlock()
+		go func() {
+			defer m.jobs.Done()
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-m.checked:
+			}
+			for _, a := range m.Status() {
+				if a.HasSource && a.State == "missing" {
+					_ = m.Start(a.ID, "")
+				}
+			}
+		}()
+	})
+}
+
 func (m *Manager) check(a *artifact) {
 	_, n, err := installedFile(a.modelFile, a.alternative)
 	state, message := "missing", ""
@@ -146,6 +180,7 @@ func (m *Manager) Status() []Status {
 	}
 	return out
 }
+
 func (m *Manager) find(id string) *artifact {
 	for _, a := range m.files {
 		if a.ID == id {
@@ -208,6 +243,7 @@ func (m *Manager) Start(id, link string) error {
 	}()
 	return nil
 }
+
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -254,7 +290,7 @@ func (m *Manager) download(ctx context.Context, a *artifact, link string, custom
 		a.Total = a.Size
 	}
 	m.mu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(a.path), 0o700); err != nil {
 		return fmt.Errorf("Не удалось создать каталог моделей.")
 	}
 	f, err := os.CreateTemp(filepath.Dir(a.path), ".download-*")

@@ -69,10 +69,12 @@ func TestObservations(t *testing.T) {
 		"horse_id":    horse.ID,
 		"location":    "50.01,30.02",
 		"observer_id": "watcher-1",
+		"comment":     "  На лугу.\nУ реки.  ",
 		"blob_ids":    []string{},
 	}), http.StatusCreated))
 	require.Equal(t, horse.ID, obs.HorseID)
 	require.Equal(t, "watcher-1", obs.ObserverID)
+	require.Equal(t, "На лугу.\nУ реки.", obs.Comment)
 
 	// несуществующая лошадь → 404
 	MakeRequest(t, NewRequestWithJSON(t, http.MethodPost, "/api/v1/observations", map[string]any{
@@ -87,6 +89,7 @@ func TestObservations(t *testing.T) {
 		MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/observations?horse_id="+horse.ID), http.StatusOK))
 	require.Len(t, list, 1)
 	require.Equal(t, obs.ID, list[0].ID)
+	require.Equal(t, obs.Comment, list[0].Comment)
 }
 
 func TestBlobsUploadDeduplication(t *testing.T) {

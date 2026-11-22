@@ -21,7 +21,7 @@ func addComparisonSchemas(s map[string]schemaNode) {
 	s["ComparisonRequest"] = obj().prop("blob_sha256", sha).prop("capture_date", schemaNode{"type": "string", "format": "date"}).prop("top_k", schemaNode{"type": "integer", "minimum": 1, "default": 5}).required("blob_sha256")
 	s["ComparisonResult"] = obj().prop("comparison_id", id).prop("blob_sha256", sha).prop("detections", schemaArray(schemaRef("HorseDetection"))).required("comparison_id", "blob_sha256", "detections")
 	decision := func(action, field string, value schemaNode) schemaNode {
-		return obj().prop("action", schemaNode{"type": "string", "enum": []string{action}}).prop(field, value).prop("observation_name", label).required("action", field, "observation_name")
+		return obj().prop("action", schemaNode{"type": "string", "enum": []string{action}}).prop(field, value).prop("observation_name", label).prop("comment", strSchema("Комментарий к наблюдению, опционально")).required("action", field, "observation_name")
 	}
 	s["ComparisonDecision"] = schemaNode{"oneOf": []schemaNode{decision("match", "horse_id", id), decision("create_horse", "horse_name", label)}}
 	s["DecisionResult"] = obj().prop("observation_id", id).prop("horse_id", id).prop("remaining_detection_ids", schemaArray(id)).required("observation_id", "horse_id", "remaining_detection_ids")

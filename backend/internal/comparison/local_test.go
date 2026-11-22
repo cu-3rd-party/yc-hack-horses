@@ -52,11 +52,15 @@ func TestLocalComparisonOrientsImageAndKeepsEachInstance(t *testing.T) {
 		require.Nil(t, box)
 		require.Equal(t, image.Rect(0, 0, 40, 20), input.Decoded.Bounds())
 		return []yolo.InstanceEmbedding{
-			{Box: image.Rect(10, 0, 30, 20), MaskPNG: mask, Confidence: .98,
+			{
+				Box: image.Rect(10, 0, 30, 20), MaskPNG: mask, Confidence: .98,
 				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{1, 0}},
-				Traits:    &reid.TraitEvidence{Values: map[string]float64{"coat_warmth": 1.5, "coat_light": .25, "head_ratio": 2}, Layers: map[string][]byte{"coat_light": head}}},
-			{Box: image.Rect(30, 0, 40, 10), MaskPNG: head, Confidence: .78,
-				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{0, 1}}},
+				Traits:    &reid.TraitEvidence{Values: map[string]float64{"coat_warmth": 1.5, "coat_light": .25, "head_ratio": 2}, Layers: map[string][]byte{"coat_light": head}},
+			},
+			{
+				Box: image.Rect(30, 0, 40, 10), MaskPNG: head, Confidence: .78,
+				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{0, 1}},
+			},
 		}, nil
 	})}
 	result, err := m.Analyze(t.Context(), data, "image/jpeg")

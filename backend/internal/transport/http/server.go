@@ -71,7 +71,7 @@ func NewRouter(d Deps) http.Handler {
 
 	if d.WebDir != "" {
 		files := http.FileServer(http.Dir(d.WebDir))
-		for _, route := range []string{"/", "/assets/{file}", "/photos/{file}", "/licenses/{file}"} {
+		for _, route := range []string{"/", "/assets/{file}", "/pdfjs/{group}/{file}", "/photos/{file}", "/licenses/{file}"} {
 			r.Get(route, files.ServeHTTP)
 			r.Head(route, files.ServeHTTP)
 		}
@@ -88,6 +88,8 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/horses", createHorse(d))
 		v1.Patch("/horses/{id}", patchHorse(d))
 		v1.Get("/horses/{id}", getHorse(d))
+		v1.Put("/horses/{id}/passport", putHorsePassport(d))
+		v1.Get("/horses/{id}/passport", getHorsePassport(d))
 
 		v1.Get("/observations", listObservations(d))
 		v1.Post("/observations", createObservation(d))
@@ -100,6 +102,7 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/blobs", uploadBlob(d))
 		v1.Get("/blobs", listBlobs(d))
 		v1.Get("/blobs/{sha256}", getBlob(d))
+		v1.Delete("/blobs/{sha256}", deleteBlob(d))
 
 		// CV-inference (ADR-0012): предсказание, подтверждение человеком, поиск похожих.
 		v1.Post("/inference/traits", postInferenceTraits(d))

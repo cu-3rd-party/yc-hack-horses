@@ -16,6 +16,7 @@ export interface Photo {
   annotation: Annotation;
 }
 export interface Horse {
+  passportSha256?: string;
   id: string;
   name: string;
 }
@@ -36,6 +37,7 @@ export function describeTraits(readings: TraitReading[]) {
     .join(', ');
 }
 export interface Observation {
+  comment?: string;
   id: string;
   horseId: string | null;
   name: string;
@@ -95,6 +97,7 @@ export interface ImportPhoto {
 }
 export type AnalysisInput = { sample: 'single' | 'pair' } | { upload: ImportPhoto };
 export interface Decision {
+  comment?: string;
   horseName?: string;
   reviewId: string;
   detectionId: string;
@@ -102,6 +105,7 @@ export interface Decision {
   name: string;
 }
 export interface ManualInput {
+  comment?: string;
   observer?: string;
   name: string;
   horseId: string | null;

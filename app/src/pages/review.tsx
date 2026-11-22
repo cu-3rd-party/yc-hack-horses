@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import {
   ArrowRight,
   Check,
@@ -24,43 +24,70 @@ import { useCommand, useHorseHistory } from '../journal/use-journal';
 import { Heading, Modal, Pager, Toggle, useNotice } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
+import { FileDropzone } from '../shared/ui/file-dropzone';
 
+export interface PhotoBatch {
+  files: File[];
+  index: number;
+  phase: 'queued' | 'processing' | 'review' | 'failed';
+  error?: string;
+}
+function nextPhoto(batch: PhotoBatch | null): PhotoBatch | null {
+  if (!batch || batch.index + 1 >= batch.files.length) return null;
+  return { files: batch.files, index: batch.index + 1, phase: 'queued' };
+}
 interface IntakeProps {
   book: Notebook;
+  batch: PhotoBatch | null;
+  setBatch: Dispatch<SetStateAction<PhotoBatch | null>>;
   openLog: (id?: string) => void;
   onBusyChange: (busy: boolean) => void;
 }
 export function ReviewPage(props: IntakeProps) {
-  const review = props.book.review;
-  return review ? (
-    <Comparison key={review.id} book={props.book} review={review} />
-  ) : (
-    <Intake {...props} />
+  const { review } = props.book;
+  const { batch, setBatch } = props;
+  return (
+    <>
+      {batch && batch.files.length > 1 && (
+        <p className="eyelabel" role="status">
+          Снимок {batch.index + 1} из {batch.files.length} · {batch.files[batch.index]!.name}
+        </p>
+      )}
+      {review ? (
+        <Comparison
+          key={review.id}
+          book={props.book}
+          review={review}
+          hasMorePhotos={!!batch && batch.index + 1 < batch.files.length}
+          onComplete={() => setBatch(nextPhoto)}
+          onCancel={() => setBatch(null)}
+        />
+      ) : (
+        <Intake {...props} />
+      )}
+    </>
   );
 }
-function Intake({ book, openLog, onBusyChange }: IntakeProps) {
-  const picker = useRef<HTMLInputElement>(null),
-    locked = useRef(false);
+function Intake({ book, batch, setBatch, openLog, onBusyChange }: IntakeProps) {
+  const locked = useRef(false);
   const [loading, setLoading] = useState(false);
-  const [drag, setDrag] = useState(false);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
   const [emptyResult, setEmptyResult] = useState(false);
   const analyze = useCommand('/analysis');
+  const notice = useNotice();
   const setup = useModels(Boolean(book.node));
-  const pending = useRef<File | null>(null);
   const waiting = Boolean(book.node && (setup.isPending || setup.isError || (setup.data && !setup.data.ready)));
-  const uploadDisabled = loading || (!desktop && waiting);
+  const uploadDisabled = loading || !!batch || (!desktop && waiting);
   useEffect(() => {
-    const file = pending.current;
-    if (!waiting && file) {
-      pending.current = null;
-      void begin(file.name, async () => ({ upload: await importImage(file) }));
-    }
-  }, [waiting]);
-  async function begin(name: string, input: () => Promise<AnalysisInput>) {
+    if (batch?.phase !== 'queued' || waiting) return;
+    const file = batch.files[batch.index]!;
+    void begin(file.name, async () => ({ upload: await importImage(file) }), batch);
+  }, [batch, waiting]);
+  async function begin(name: string, input: () => Promise<AnalysisInput>, current?: PhotoBatch) {
     if (locked.current) return;
     locked.current = true;
+    if (current) setBatch({ ...current, phase: 'processing' });
     setFileName(name);
     setError('');
     setEmptyResult(false);
@@ -68,9 +95,18 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
     onBusyChange(true);
     try {
       const result = await analyze.mutateAsync(await input());
-      setEmptyResult(result?.detections.length === 0);
+      const empty = result?.detections.length === 0;
+      setEmptyResult(empty);
+      if (current) {
+        if (empty && current.files.length > 1) notice(name + ' — лошади не обнаружены.');
+        setBatch(empty ? nextPhoto(current) : { ...current, phase: 'review' });
+      }
     } catch (cause) {
-      setError((cause as Error).message);
+      const message = (cause as Error).message;
+      setError(message);
+      if (current) {
+        setBatch(current.files.length > 1 ? { ...current, phase: 'failed', error: message } : null);
+      }
     } finally {
       locked.current = false;
       setLoading(false);
@@ -79,95 +115,66 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
   }
   function pick(files: FileList | null) {
     if (!files?.length || locked.current || uploadDisabled) return;
-    if (files.length !== 1) {
-      setFileName('');
-      setError('Выберите одну фотографию за раз.');
-      return;
-    }
-    const selected = files[0]!;
-    if (waiting) {
-      pending.current = selected;
-      setFileName(selected.name);
-      setError('');
-      setEmptyResult(false);
-      return;
-    }
-    void begin(selected.name, async () => ({ upload: await importImage(selected) }));
+    setFileName('');
+    setError('');
+    setEmptyResult(false);
+    setBatch({ files: Array.from(files), index: 0, phase: 'queued' });
+  }
+  function dismissFile(skip: boolean) {
+    setError('');
+    setFileName('');
+    setBatch(skip ? nextPhoto : null);
   }
   const recent = [...book.observations].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
   return (
     <>
       <Heading
         title="Новое наблюдение"
-        description="Загрузите снимок, чтобы найти лошадь в каталоге."
+        description="Загрузите снимки, чтобы найти лошадей в каталоге."
       />
       {book.node && setup.isError && <p role="alert">Не удалось проверить модели. <button className="text-link" onClick={()=>void setup.refetch()}>Повторить</button></p>}
       {book.node && setup.data && !setup.data.ready && <ModelPanel setup={setup.data}/>}
       <div className="intake-grid">
         <section aria-label="Загрузка фотографии">
           <h2 className="intake-label">Полевой снимок</h2>
-          <input
-            type="file"
-            className="sr-only"
-            aria-label="Файл наблюдения"
-            tabIndex={-1}
-            ref={picker}
-            accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl"
-            disabled={uploadDisabled}
-            onChange={(e) => {
-              pick(e.target.files);
-              e.target.value = '';
-            }}
+          <FileDropzone
+            label="Файл наблюдения" accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl" multiple
+            disabled={uploadDisabled} busyLabel={loading ? 'Анализируем снимок…' : undefined}
+            invalid={!!error} describedBy="upload-feedback" onFiles={pick}
           />
-          <button
-            className={'dropzone' + (drag ? ' drag' : '') + (error ? ' invalid' : '')}
-            disabled={uploadDisabled}
-            aria-busy={loading}
-            aria-describedby="upload-feedback"
-            onClick={() => picker.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!uploadDisabled) setDrag(true);
-            }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDrag(false);
-              pick(e.dataTransfer.files);
-            }}
-          >
-            {loading && <LoaderCircle className="spin" size={18} />}
-            <span>
-              {loading ? (
-                'Анализируем снимок…'
-              ) : (
-                <>
-                  <strong>Выберите файл</strong> или перетащите его сюда
-                </>
-              )}
-            </span>
-          </button>
           {emptyResult && <p role="status">На снимке не обнаружено лошадей.</p>}
-          {fileName && (
+          {(batch || fileName) && (
             <div className="file-state" role="status">
               <FileImage size={17} />
-              <span>{fileName}</span>
+              <span>{batch ? batch.files[batch.index]!.name : fileName}</span>
               {loading && <small>Обработка</small>}
-              {waiting && pending.current && <><small>Ожидает готовности моделей</small><button className="text-link" onClick={() => {pending.current=null;setFileName('')}}>Убрать файл</button></>}
+              {waiting && batch?.phase === 'queued' && (
+                <>
+                  <small>Ожидает готовности моделей</small>
+                  <button className="text-link" onClick={() => dismissFile(false)}>Отменить загрузку</button>
+                </>
+              )}
             </div>
           )}
-          {error ? (
+          {(batch?.error || error) ? (
             <div id="upload-feedback" className="file-error" role="alert">
               <CircleAlert size={16} />
-              <span>{error}</span>
+              <span>{batch?.error || error}</span>
+              {batch?.phase === 'failed' && (
+                <>
+                  <button className="text-link" onClick={() => setBatch({ ...batch, phase: 'queued', error: undefined })}>
+                    Повторить
+                  </button>
+                  <button className="text-link" onClick={() => dismissFile(true)}>Пропустить снимок</button>
+                  <button className="text-link" onClick={() => dismissFile(false)}>Отменить очередь</button>
+                </>
+              )}
             </div>
           ) : (
             <p className="file-hint" id="upload-feedback">
               {desktop
-                ? 'Одна фотография за раз. JPG, PNG, HEIC, TIFF и другие форматы изображений.'
-                : 'Одна фотография за раз в формате, который поддерживает браузер, например JPG или PNG.'}
+                ? 'Снимки обрабатываются по очереди. JPG, PNG, HEIC, TIFF и другие форматы изображений.'
+                : 'Снимки обрабатываются по очереди. Подойдут JPG, PNG и другие форматы, которые поддерживает браузер.'}
             </p>
           )}
         </section>
@@ -206,7 +213,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
                 <button
                   key={key}
                   className="sample-card"
-                  disabled={loading}
+                  disabled={uploadDisabled}
                   onClick={() => void begin(photo.name, async () => ({ sample: key }))}
                 >
                   <div className="sample-art">
@@ -228,7 +235,13 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
     </>
   );
 }
-function Comparison({ book, review }: { book: Notebook; review: Review }) {
+function Comparison({ book, review, hasMorePhotos, onComplete, onCancel }: {
+  book: Notebook;
+  review: Review;
+  hasMorePhotos: boolean;
+  onComplete: () => void;
+  onCancel: () => void;
+}) {
   const [ordinal, setOrdinal] = useState(review.detections[0]!.number);
   const detection =
     review.detections.find((d) => d.number >= ordinal) ??
@@ -257,6 +270,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
   const [traits, setTraits] = useState(true),
     [modal, setModal] = useState<'pick' | 'match' | 'new' | 'cancel' | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [comments, setComments] = useState<Record<string, string>>({});
   const [horseNames, setHorseNames] = useState<Record<string, string>>({});
   const horseName = horseNames[detection.id] ?? '';
   const filename = drafts[detection.id] ?? defaultName(review.photo.name, detection.number);
@@ -275,6 +289,7 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
     try {
       if (modal === 'cancel') {
         await cancel.mutateAsync({ reviewId: review.id });
+        onCancel();
         notice('Сравнение отменено.');
         return;
       }
@@ -283,8 +298,10 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
         detectionId: detection.id,
         horseId: modal === 'new' ? null : candidateId!,
         name: filename,
+        comment: comments[detection.id],
         horseName: modal === 'new' ? horseName : undefined,
       });
+      if (review.detections.length === 1) onComplete();
       notice(
         modal === 'new'
           ? 'Новая особь добавлена в галерею.'
@@ -445,7 +462,11 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
       {modal === 'cancel' && (
         <Modal
           title="Отменить сравнение"
-          description="Оставшиеся наблюдения будут пропущены"
+          description={
+            hasMorePhotos
+              ? 'Оставшиеся наблюдения и снимки очереди будут пропущены.'
+              : 'Оставшиеся наблюдения будут пропущены'
+          }
           busy={saving}
           onClose={() => setModal(null)}
         >
@@ -508,6 +529,14 @@ function Comparison({ book, review }: { book: Notebook; review: Review }) {
                 value={filename}
                 disabled={saving}
                 onChange={(e) => setDrafts({ ...drafts, [detection.id]: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              Комментарий
+              <textarea
+                value={comments[detection.id] ?? ''}
+                disabled={saving}
+                onChange={(e) => setComments({ ...comments, [detection.id]: e.target.value })}
               />
             </label>
             {!validName(filename) && (

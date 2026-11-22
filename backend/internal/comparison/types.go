@@ -4,12 +4,14 @@ package comparison
 
 import "github.com/cu3rd/yc-hack-horses/backend/internal/domain"
 
-type Point [2]float64
-type Trait struct {
-	Key     string  `json:"key"`
-	Value   string  `json:"value"`
-	Polygon []Point `json:"polygon"`
-}
+type (
+	Point [2]float64
+	Trait struct {
+		Key     string  `json:"key"`
+		Value   string  `json:"value"`
+		Polygon []Point `json:"polygon"`
+	}
+)
 
 // PartMask is the lossless indexed anatomical PNG inside its normalized frame box.
 type PartMask struct {
@@ -41,6 +43,7 @@ type Result struct {
 	Detections []Detection `json:"detections"`
 }
 type Decision struct {
+	Comment   string `json:"comment,omitempty"`
 	Action    string `json:"action"`
 	HorseID   string `json:"horse_id,omitempty"`
 	HorseName string `json:"horse_name,omitempty"`

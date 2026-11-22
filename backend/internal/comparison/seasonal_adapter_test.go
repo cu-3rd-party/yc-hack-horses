@@ -44,8 +44,10 @@ func TestSeasonalBoxExampleRepresentsTheHorse(t *testing.T) {
 	x[0], y[1] = 1, 1
 	middle[0], middle[1] = 1, 1
 	ref := func(id string, vector []float64) Reference {
-		return Reference{HorseID: "horse", PhotoID: id,
-			Descriptor: Descriptor{Version: reid.BoxVersion, CaptureTime: "2025-04-02", Vector: vector}}
+		return Reference{
+			HorseID: "horse", PhotoID: id,
+			Descriptor: Descriptor{Version: reid.BoxVersion, CaptureTime: "2025-04-02", Vector: vector},
+		}
 	}
 	refs := []Reference{ref("query-like", x), ref("representative", middle), ref("third", y)}
 	got := Rank(refs[0].Descriptor, refs, 1)

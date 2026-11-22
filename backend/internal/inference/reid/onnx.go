@@ -53,6 +53,7 @@ func verifiedFile(dir, name, sha string) (string, error) {
 	}
 	return path, nil
 }
+
 func session(path, input, output string) (*ort.DynamicAdvancedSession, error) {
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
@@ -161,6 +162,7 @@ func cropForParts(src image.Image, box image.Rectangle) (*image.RGBA, error) {
 	draw.Draw(img, roi, src, roi.Min, draw.Src)
 	return img, nil
 }
+
 func (e *Segmenter) Mask(ctx context.Context, src image.Image, box image.Rectangle) ([]byte, error) {
 	region, err := e.Region(ctx, src, box, true)
 	if err != nil {

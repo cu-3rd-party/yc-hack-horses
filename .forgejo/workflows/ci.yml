@@ -22,6 +22,7 @@ jobs:
       image: ${{ steps.changes.outputs.image }}
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
+      data: ${{ steps.changes.outputs.data }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,14 +151,71 @@ jobs:
           printf '%s' "$REGISTRY_TOKEN" | docker login git.cu3rd.ru --username "$REGISTRY_USER" --password-stdin
           docker push "$IMAGE"
 
+  build-data:
+    needs: changes
+    if: needs.changes.outputs.data == 'true'
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and smoke-test static image
+        env:
+          IMAGE: git.cu3rd.ru/cu3rd/yc-hack-horses-data:${{ github.sha }}
+        run: |
+          set -eu
+          docker version --format 'daemon {{.Server.Version}}'
+          docker build --provenance=false --sbom=false --cpuset-cpus 0-3 --memory 4g -f infra/data-nginx/Dockerfile -t "$IMAGE" infra/data-nginx
+          # смок: автоиндекс каталога и запрет dotfiles (busybox wget, curl нет).
+          # имя уникально для прогона: контейнер от упавшего прошлого прогона
+          # остаётся на демоне раннера (trap не срабатывает при kill джобы).
+          # эхо перед каждым шагом: без него падение под set -e немое.
+          smoke="data-smoke-${{ github.run_id }}"
+          echo "smoke=$smoke"
+          docker rm -fv "$smoke" >/dev/null 2>&1 || true
+          docker run -d --name "$smoke" "$IMAGE"
+          trap 'docker rm -fv "$smoke" >/dev/null' EXIT
+          echo "smoke started"
+          docker exec "$smoke" mkdir -p /data/sub /data/.hidden
+          docker exec "$smoke" sh -c 'echo hi > /data/sub/f.txt; echo secret > /data/.hidden/token'
+          # 403-проверка ниже: wget на 403 выходит с кодом 1 — пайп под pipefail
+          # унаследует её и set -e молча убьёт скрипт, поэтому wget в подкоманду
+          # с || true: код ответа выдираем из заголовков.
+          code=$( (docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/ 2>&1 || true) | awk '/^  HTTP/{print $2}' | tail -1)
+          echo "index code=$code"
+          [ "$code" = 200 ] || { echo "index code $code"; exit 1; }
+          docker exec "$smoke" wget -q -O - http://127.0.0.1:8080/ | grep -q 'sub/' || { echo 'no autoindex'; exit 1; }
+          echo "autoindex ok"
+          code=$( (docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/.hidden/token 2>&1 || true) | awk '/^  HTTP/{print $2}' | tail -1)
+          echo "dotfile code=$code"
+          [ "$code" = 403 ] || { echo "dotfile code $code"; exit 1; }
+          echo "dotfile ok"
+      - name: Publish static image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        env:
+          REGISTRY_USER: ${{ vars.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          IMAGE: git.cu3rd.ru/cu3rd/yc-hack-horses-data:${{ github.sha }}
+        run: |
+          set -eu
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$REGISTRY_TOKEN" | docker login git.cu3rd.ru --username "$REGISTRY_USER" --password-stdin
+          docker push "$IMAGE"
+
   deploy:
-    needs: [changes, build-image]
+    needs: [changes, build-image, build-data]
     # always() нужен, чтобы skipped у неизменившегося компонента не блокировал джобу.
     if: >-
       always() && !cancelled() &&
       github.event_name != 'pull_request' && github.ref == 'refs/heads/master' &&
       needs.changes.result == 'success' &&
-      needs.build-image.result == 'success'
+      needs.build-image.result == 'success' &&
+      (needs.build-data.result == 'success' || needs.build-data.result == 'skipped')
     runs-on: homelab-docker
     # Подтверждает происхождение доставки: PR с новым тегом сливает self-service-approver.
     # Без этого каждая доставка ждала бы ревью SRE.

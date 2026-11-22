@@ -9,6 +9,7 @@
 #    как часть репозитория; решение зафиксировано в ADR.
 #  - libonnxruntime.so: пакет Microsoft.ML.OnnxRuntime (NuGet), версия 1.31.1
 #    (GitHub-релизы onnxruntime недоступны с 2026-11-17, NuGet остаётся).
+# ORT_ONLY=1 устанавливает только библиотеку для серверного образа без весов.
 set -euo pipefail
 
 MODELS_DIR="${MODELS_DIR:-infra/models}"
@@ -35,17 +36,19 @@ ORT_SHA256="${ORT_SHA256:-6871ccbc97f3d5bdb4095a1dcec33aa78d56f6ed8de5980ef5fa1d
 
 mkdir -p "$MODELS_DIR"
 
-echo "[1/2] $YOLO_FILENAME"
-YOLO_PATH="$MODELS_DIR/$YOLO_FILENAME"
-if [ -f "$YOLO_PATH" ] && echo "$YOLO_SHA256  $YOLO_PATH" | sha256sum -c - >/dev/null 2>&1; then
-  echo "  уже скачан, sha256 совпадает"
-else
-  detector_tmp=$(mktemp "$MODELS_DIR/.yolo-download.XXXXXXXX")
-  trap 'rm -f "$detector_tmp"' EXIT
-  curl -fsSL -o "$detector_tmp" "$YOLO_URL"
-  echo "$YOLO_SHA256  $detector_tmp" | sha256sum -c -
-  mv "$detector_tmp" "$YOLO_PATH"
-  trap - EXIT
+if [ "${ORT_ONLY:-0}" != 1 ]; then
+  echo "[1/2] $YOLO_FILENAME"
+  YOLO_PATH="$MODELS_DIR/$YOLO_FILENAME"
+  if [ -f "$YOLO_PATH" ] && echo "$YOLO_SHA256  $YOLO_PATH" | sha256sum -c - >/dev/null 2>&1; then
+    echo "  уже скачан, sha256 совпадает"
+  else
+    detector_tmp=$(mktemp "$MODELS_DIR/.yolo-download.XXXXXXXX")
+    trap 'rm -f "$detector_tmp"' EXIT
+    curl -fsSL -o "$detector_tmp" "$YOLO_URL"
+    echo "$YOLO_SHA256  $detector_tmp" | sha256sum -c -
+    mv "$detector_tmp" "$YOLO_PATH"
+    trap - EXIT
+  fi
 fi
 
 echo "[2/2] libonnxruntime.so ($ORT_VERSION, NuGet)"
@@ -67,4 +70,4 @@ with z.open("runtimes/linux-x64/native/libonnxruntime.so") as src, open(out, "wb
     shutil.copyfileobj(src, dst)
 EOF
 fi
-echo "готово: $YOLO_PATH, $ORT_PATH"
+echo "готово: $MODELS_DIR, $ORT_PATH"

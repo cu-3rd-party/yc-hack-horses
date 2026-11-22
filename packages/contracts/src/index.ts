@@ -14,6 +14,14 @@ export interface Horse {
   metadata: HorseMetadata;
 }
 
+/** PUT /api/v1/horses/{id}/passport, multipart/form-data. Returns the updated Horse. */
+export interface HorsePassportUpload {
+  file: File;
+  studbook_number?: string;
+}
+
+export const MAX_PASSPORT_BYTES = 50 * 1024 * 1024;
+
 export interface HorseMetadata {
   name?: string;
   nickname?: string;
@@ -21,6 +29,16 @@ export interface HorseMetadata {
   birth_year?: number | null;
   color?: string;
   notes?: string;
+  /** Номер по племенной книге. */
+  studbook_number?: string;
+  /**
+   * PDF-паспорт: загрузка PUT /api/v1/horses/{id}/passport (multipart: file, studbook_number),
+   * просмотр GET /api/v1/horses/{id}/passport. Поля заполняет нода, не клиент.
+   */
+  passport_sha256?: string;
+  passport_filename?: string;
+  passport_size?: string;
+  passport_attached_at?: ISO8601;
   [key: string]: unknown;
 }
 
@@ -31,6 +49,7 @@ export interface GeoLocation {
 }
 
 export interface Observation {
+  comment?: string;
   id: string;
   horse_id?: string | null;
   node_id: string;
@@ -84,6 +103,7 @@ export interface HorseUpsertPayload {
 }
 
 export interface ObservationCreatePayload {
+  comment?: string;
   horse_id?: string | null;
   observed_at?: ISO8601;
   location?: GeoLocation | null;

@@ -1,11 +1,28 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { command, getBook, readMedia, validCoordinates } from './api';
+import { command, getBook, readDemoPassport, readMedia, validCoordinates } from './api';
 import { horsePhotos, validName } from './types';
 beforeEach(async () => {
   await command('/reset', undefined);
 });
 describe('локальный журнал', () => {
+  it('заменяет PDF только у выбранной особи и удаляет его при сбросе демоданных', async () => {
+    const horseId = 'saran';
+    const attach = (value: string) => command('/passport', {
+      horseId, file: new File([value], 'passport.pdf', { type: 'application/pdf' }),
+    });
+    const before = (await getBook()).mediaBytes ?? 0;
+    const first = await attach('%PDF-1.4 first');
+    const next = await attach('%PDF-1.4 replacement');
+    const hash = (book: typeof first) => book.horses.find(h => h.id === horseId)?.passportSha256;
+    expect(hash(first)).toHaveLength(64);
+    expect(hash(next)).not.toBe(hash(first));
+    expect(await (await readDemoPassport(horseId))?.text()).toBe('%PDF-1.4 replacement');
+    expect(next.mediaBytes).toBe(before + '%PDF-1.4 replacement'.length);
+    expect(await readDemoPassport('buran')).toBeUndefined();
+    await command('/reset', undefined);
+    expect(await readDemoPassport(horseId)).toBeUndefined();
+  });
   it('разрешает каждую особь отдельно и отклоняет повтор старого решения', async () => {
     const initial = await getBook();
     const book = await command('/analysis', { sample: 'pair' });

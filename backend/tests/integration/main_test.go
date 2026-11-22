@@ -19,7 +19,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var testRoutes http.Handler
+var (
+	testRoutes http.Handler
+	// testStore — тот же стор, что у роутера: тестам нужен прямой доступ к
+	// журналу (например, подсчёт событий по event_type).
+	testStore *sqlstore.Store
+)
 
 func TestMain(m *testing.M) {
 	dataDir, err := os.MkdirTemp("", "integration-data-*")
@@ -37,6 +42,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	testStore = store
 	if err := migrate.Apply(context.Background(), store.DB(), "../../migrations", "sqlite"); err != nil {
 		panic(err)
 	}

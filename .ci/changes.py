@@ -15,6 +15,8 @@ BACKEND_DIRS = ("backend/cmd/", "backend/internal/", "backend/migrations/", "bac
 WEB_FILES = {"app/index.html", "app/package.json", "app/package-lock.json", "app/tsconfig.json", "app/vite.config.ts"}
 WEB_DIRS = ("app/src/", "app/public/", "packages/contracts/src/")
 FRONTEND_DIRS = ("app/", "packages/")
+# Статика хакатона (nginx-unprivileged, hostPath /data на nxs).
+DATA_FILES = {"infra/data-nginx/Dockerfile", "infra/data-nginx/nginx.conf"}
 # Changes to the build pipeline itself must also be validated by building images.
 COMMON_FILES = {".forgejo/workflows/ci.yml", ".ci/changes.py"}
 
@@ -27,6 +29,7 @@ def components(paths: list[str]) -> dict[str, bool]:
         "image": backend or web or ".ci/smoke-web.mjs" in paths,
         "backend": backend,
         "frontend": common or any(path.startswith(FRONTEND_DIRS) for path in paths),
+        "data": common or any(path in DATA_FILES for path in paths),
     }
 
 

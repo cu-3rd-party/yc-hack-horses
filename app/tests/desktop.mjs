@@ -86,8 +86,8 @@ try {
   assert.ok(expandedBounds.x + expandedBounds.width <= workspace.x);
   await button('Свернуть меню').click();
   assert.equal((await sidebar.boundingBox()).width, 80);
-  await nav('Галерея особей');
-  assert.equal(await button('Галерея особей').getAttribute('aria-current'), 'page');
+  await nav('Особи');
+  assert.equal(await button('Особи').getAttribute('aria-current'), 'page');
   await nav('Распознавание');
   await button('Развернуть меню').click();
   assert.equal((await sidebar.boundingBox()).width, expandedBounds.width);
@@ -203,13 +203,13 @@ try {
   await page.locator('.toast').waitFor({ state: 'detached' });
   await match('Две особи — вторая.jpg', true);
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
-  await nav('Галерея особей');
+  await nav('Особи');
   await snap('gallery');
   await page.getByRole('button', { name: /Искра/ }).click();
   await page.getByRole('button', { name: /Две особи — вторая/ }).click();
   await dialog().getByRole('heading', { name: 'Две особи — вторая.jpg' }).waitFor();
   await page.keyboard.press('Escape');
-  await button('Назад в галерею').click();
+  await button('Назад к особям').click();
   await page.getByRole('button', { name: /Алтай/ }).click();
   await page.getByRole('button', { name: /Алтай — на выпасе/ }).click();
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -240,13 +240,16 @@ try {
   await horseSelect.click();
   await horseSelect.getByRole('option', { name: 'Без привязки' }).click();
   await page.getByLabel('Название наблюдения').fill('Полевой след');
+  await page.getByLabel('Комментарий').fill('След у воды');
   await page.getByLabel('Значение признака', { exact: true }).fill('Тёмная');
   await button('Подставить демокоординаты').click();
   await button('Сохранить запись').click();
   const unlinked = button('Только без привязки');
   await unlinked.click();
   assert.equal(await unlinked.getAttribute('aria-pressed'), 'true');
-  await page.getByRole('button', { name: /Полевой след/ }).waitFor();
+  await page.getByRole('button', { name: /Полевой след/ }).click();
+  await dialog().getByText('След у воды', { exact: true }).waitFor();
+  await page.keyboard.press('Escape');
   await nav('Синхронизация');
   const connection = page.getByRole('switch', { name: 'Связь с демо-узлом' });
   await connection.click();
@@ -282,7 +285,7 @@ try {
     await match('Загруженное фото.' + ext);
     await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   }
-  // Real DOM file drops exercise both the multi-file rejection and the valid path.
+  // A multi-file drop advances only after each photo has been reviewed.
   const jpeg = (await readFile(sample)).toString('base64');
   async function drop(count) {
     await page.locator('.dropzone').evaluate(
@@ -299,19 +302,18 @@ try {
     );
   }
   await drop(2);
-  await page
-    .getByRole('alert')
-    .getByText(/одну фотографию/)
-    .waitFor();
-  await drop(1);
+  await page.getByText('Снимок 1 из 2 · drop-0.jpg').waitFor();
   await page.getByText(/иллюстративные признаки/).waitFor();
+  await match('Первая из очереди.jpg');
+  await page.getByText('Снимок 2 из 2 · drop-1.jpg').waitFor();
+  await page.getByRole('heading', { name: 'Сравнение наблюдений' }).waitFor();
   await match('Перетянутый снимок.jpg');
   await nav('Сводка');
   await page.getByText('TAKHI-FIELD-01').waitFor();
   await app.close();
   app = null;
   await launch();
-  await nav('Галерея особей');
+  await nav('Особи');
   await page.getByRole('button', { name: /Сарана/ }).click();
   const galleryQuality = page.getByRole('combobox', { name: 'Качество' });
   await galleryQuality.click();
@@ -327,7 +329,7 @@ try {
   await button('Сбросить демо').click();
   await dialog().getByRole('button', { name: 'Восстановить', exact: true }).click();
   await dialog().waitFor({ state: 'hidden' });
-  await nav('Галерея особей');
+  await nav('Особи');
   assert.equal(await page.locator('.herd-card').count(), 4);
   await nav('Распознавание');
   await page.getByRole('button', { name: /На выпасе/ }).click();
