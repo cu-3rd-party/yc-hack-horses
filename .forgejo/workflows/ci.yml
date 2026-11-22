@@ -199,7 +199,7 @@ jobs:
       github.event_name != 'pull_request' && github.ref == 'refs/heads/master' &&
       needs.changes.result == 'success' &&
       needs.build-image.result == 'success' &&
-      (needs.build-data.result == 'success' || needs.build-data.result == 'skipped')'
+      (needs.build-data.result == 'success' || needs.build-data.result == 'skipped')
     runs-on: homelab-docker
     # Подтверждает происхождение доставки: PR с новым тегом сливает self-service-approver.
     # Без этого каждая доставка ждала бы ревью SRE.
