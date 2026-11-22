@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MapPin, Plus, LoaderCircle, Search, Expand, Unlink } from 'lucide-react';
+import { MapPin, Plus, LoaderCircle, Search, Expand, Trash2, Unlink } from 'lucide-react';
 import type { Notebook, Observation } from '../journal/types';
 import { dateLabel, describeTraits, validName } from '../journal/types';
 import { importImage } from '../journal/media';
@@ -164,7 +164,19 @@ export function ObservationLog({
                 <dd>{Math.round(detail.confidence * 100)}%</dd>
               </>
             )}
+            {detail.comment && (
+              <>
+                <dt>Комментарий</dt>
+                <dd className="observation-comment">{detail.comment}</dd>
+              </>
+            )}
           </dl>
+          <div className="dialog-actions">
+            <small id="delete-unavailable">Удаление пока недоступно.</small>
+            <Button size="lg" variant="outline" disabled aria-describedby="delete-unavailable">
+              <Trash2 size={16} /> Удалить наблюдение
+            </Button>
+          </div>
         </Modal>
       )}
     </>
@@ -172,6 +184,7 @@ export function ObservationLog({
 }
 function Manual({ book, close }: { book: Notebook; close: () => void }) {
   const live = Boolean(book.node);
+  const [comment, setComment] = useState('');
   const [observer, setObserver] = useState('');
   const [name, setName] = useState(''),
     [horse, setHorse] = useState(''),
@@ -214,6 +227,7 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
             await action.mutateAsync({
               name,
               observer,
+              comment,
               horseId: horse || null,
               coordinates: coords,
               traits: entries
@@ -351,6 +365,10 @@ function Manual({ book, close }: { book: Notebook; close: () => void }) {
               </label>
             </>
           )}
+          <label className="field">
+            Комментарий
+            <textarea value={comment} onChange={(e) => setComment(e.target.value)} />
+          </label>
           <div className="dialog-actions">
             <Button size="lg" type="button" variant="outline" onClick={close}>
               Отменить

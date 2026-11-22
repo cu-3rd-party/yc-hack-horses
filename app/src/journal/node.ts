@@ -140,6 +140,7 @@ function observation(row: NodeObservation, blobs: Map<string, string>): Observat
     name,
     horseId: row.horse_id || null,
     date: row.observed_at,
+    comment: row.comment,
     coordinates: row.location,
     observer: row.observer_id,
     photos: images,
@@ -245,14 +246,10 @@ export async function decide(input: Decision) {
     '/detections/' +
     encodeURIComponent(input.detectionId) +
     '/decision';
-  const body: ComparisonDecision =
-    input.horseId === null
-      ? {
-          action: 'create_horse',
-          horse_name: input.horseName!.trim(),
-          observation_name: input.name.trim(),
-        }
-      : { action: 'match', horse_id: input.horseId, observation_name: input.name.trim() };
+  const observation = { observation_name: input.name.trim(), comment: input.comment?.trim() || undefined };
+  const body: ComparisonDecision = input.horseId === null
+    ? { ...observation, action: 'create_horse', horse_name: input.horseName!.trim() }
+    : { ...observation, action: 'match', horse_id: input.horseId };
   return request<DecisionResult>(path, 'PUT', body);
 }
 export function cancelComparison(id: string) {
@@ -264,6 +261,7 @@ export async function saveManual(input: ManualInput) {
   for (const file of input.files) hashes.push(await upload(file));
   return request<NodeObservation>('/observations', 'POST', {
     observer_id: input.observer.trim(),
+    comment: input.comment?.trim() || undefined,
     location: input.coordinates.trim(),
     horse_id: input.horseId ?? undefined,
     blob_ids: hashes,

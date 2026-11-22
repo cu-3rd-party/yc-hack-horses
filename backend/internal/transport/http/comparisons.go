@@ -121,6 +121,7 @@ func decideComparison(d Deps) http.HandlerFunc {
 			writeError(w, 400, "invalid JSON body")
 			return
 		}
+		input.Comment = strings.TrimSpace(input.Comment)
 		input.Name = strings.TrimSpace(input.Name)
 		input.HorseName = strings.TrimSpace(input.HorseName)
 		if !validDecision(input) {
@@ -210,7 +211,7 @@ func saveDetection(ctx context.Context, d Deps, tx *sqlstore.Store, sha string, 
 			return saved, nil, err
 		}
 	}
-	o := domain.Observation{ID: uuid.Must(uuid.NewV7()).String(), HorseID: horseID, NodeID: d.NodeID, ObserverID: d.NodeID, Name: v.Name, ObservedAt: now, BlobIDs: []string{sha}}
+	o := domain.Observation{ID: uuid.Must(uuid.NewV7()).String(), HorseID: horseID, NodeID: d.NodeID, ObserverID: d.NodeID, Name: v.Name, Comment: v.Comment, ObservedAt: now, BlobIDs: []string{sha}}
 	p := comparison.ReferencePhoto{Photo: comparison.Photo{ID: item.ID, SHA: sha, Name: v.Name, Annotation: &item.Annotation}, Descriptor: item.Descriptor}
 	record := comparison.ObservationEvent{Observation: o, Photos: []comparison.ReferencePhoto{p}}
 	if err := tx.CreateReviewedObservation(ctx, record); err != nil {

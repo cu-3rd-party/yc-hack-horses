@@ -56,6 +56,7 @@ type pathItem struct {
 	Post      *operation `yaml:"post,omitempty"`
 	Put       *operation `yaml:"put,omitempty"`
 	Patch     *operation `yaml:"patch,omitempty"`
+	Delete    *operation `yaml:"delete,omitempty"`
 	WebSocket string     `yaml:"x-websocket,omitempty"`
 }
 
@@ -173,6 +174,8 @@ func buildOpenAPISpec() []byte {
 			item.Put = op
 		case "patch":
 			item.Patch = op
+		case "delete":
+			item.Delete = op
 		}
 		spec.Paths[path] = item
 		return op
@@ -289,6 +292,14 @@ func buildOpenAPISpec() []byte {
 		"422": {Description: "observer_id отсутствует", Content: errorRef},
 	})
 
+	deleteObs := add("/api/v1/observations/{id}", "delete", "Удалить наблюдение (планируется)", "deleteObservation", "observations",
+		"Проект контракта. Маршрут ещё не реализован. Запрос принимает ID наблюдения в пути без тела.")
+	deleteObs.Parameters = []parameter{idParam("id", "UUID наблюдения")}
+	deleteObs.Responses = map[string]resp{
+		"204": {Description: "Наблюдение удалено, тело ответа пустое"},
+		"404": {Description: "Наблюдение отсутствует", Content: errorRef},
+	}
+
 	// --- blobs ---
 	listBlobs := add("/api/v1/blobs", "get", "Список блобов", "listBlobs", "blobs", "")
 	listBlobs.Responses = map[string]resp{
@@ -389,6 +400,7 @@ func buildOpenAPISpec() []byte {
 		prop("node_id", strSchema("UUID ноды-источника")).
 		prop("observed_at", schemaNode{"type": "string", "format": "date-time"}).
 		prop("location", strSchema("текст или latlon")).
+		prop("comment", strSchema("Комментарий к наблюдению, опционально")).
 		prop("observer_id", strSchema("идентификатор наблюдателя")).
 		prop("blob_ids", schemaNode{"type": "array", "items": strSchema("blobs.id")}).
 		prop("name", strSchema("Имя наблюдения")).
@@ -432,6 +444,7 @@ func buildOpenAPISpec() []byte {
 		prop("horse_id", strSchema("опционально")).
 		prop("observed_at", schemaNode{"type": "string", "format": "date-time", "description": "пусто — текущее время"}).
 		prop("location", strSchema("текст/latlon")).
+		prop("comment", strSchema("Комментарий к наблюдению, опционально")).
 		prop("observer_id", strSchema("обязателен")).
 		prop("blob_ids", schemaNode{"type": "array", "items": strSchema("blobs.id")}).
 		required("observer_id")

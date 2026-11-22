@@ -19,11 +19,19 @@ assert.ok(
 const root = await mkdtemp(path.join(tmpdir(), 'loshid-go-review-'));
 const sample = path.join(project, 'public/photos/pair.jpg');
 const bytes = await readFile(sample);
+const emptyFixture = await readFile(path.join(project, 'public/photos/single.jpg'));
 let analyses = 0;
 const model = createServer(async (req, res) => {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
-  if (req.method !== 'POST' || !Buffer.concat(chunks).equals(bytes)) {
+  const body = Buffer.concat(chunks);
+  if (req.method === 'POST' && body.equals(emptyFixture)) {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+      width: 1440, height: 960, model_version: 'desktop-test', detections: [],
+    }));
+    return;
+  }
+  if (req.method !== 'POST' || !body.equals(bytes)) {
     res.writeHead(400).end();
     return;
   }
@@ -135,19 +143,29 @@ try {
   const dialog = page.getByRole('dialog');
   const confirm = () =>
     dialog.getByRole('button', { name: 'Подтвердить' }).click();
-  const upload = () => page.getByLabel('Файл наблюдения').setInputFiles(sample);
+  const input = page.getByLabel('Файл наблюдения');
   await heading('Новое наблюдение').waitFor();
-  await upload();
+  const files = ['Первое.jpg', 'Второе.jpg', 'Третье.jpg'].map(name => ({
+    name, mimeType: 'image/jpeg', buffer: bytes,
+  }));
+  await input.setInputFiles([
+    { name: 'Повреждённый.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('broken') },
+    { name: 'Пустое поле.jpg', mimeType: 'image/jpeg', buffer: emptyFixture },
+    ...files,
+  ]);
+  await button('Повторить').click();
+  await button('Пропустить снимок').click();
+  await page.getByText('Снимок 3 из 5 · Первое.jpg').waitFor();
   for (const [i, name] of ['Сарана', 'Буран'].entries()) {
     await heading('Новое наблюдение ' + (i + 1)).waitFor();
     await page.getByText('Подходящих особей не найдено.').waitFor();
     await button('Нет подходящих').click();
     await dialog.getByLabel('Имя лошади').fill(name);
+    await dialog.getByLabel('Комментарий').fill('Черты ' + name);
     await dialog.getByLabel('Название наблюдения').fill('Эталон ' + name);
     await confirm();
   }
-  await heading('Новое наблюдение').waitFor();
-  await upload();
+  await page.getByText('Снимок 4 из 5 · Второе.jpg').waitFor();
   await heading('Эталон Сарана').waitFor();
   await page.getByRole('button', { name: /Сарана.*80%/ }).waitFor();
   await button('Лошадь — вперёд').click();
@@ -156,6 +174,7 @@ try {
   await button('Лошадь — назад').click();
   await button('Зафиксировать результат').click();
   await dialog.getByLabel('Название наблюдения').fill('Повторная встреча');
+  await dialog.getByLabel('Комментарий').fill('Повторная встреча у реки');
   await confirm();
   await heading('Новое наблюдение 2').waitFor();
   await button('Отменить сравнение').click();
@@ -167,6 +186,7 @@ try {
   assert.equal(response.status, 200);
   const history = await response.json();
   assert.equal(history.length, 3);
+  assert.deepEqual(history.map(o => o.comment), ['Черты Сарана', 'Черты Буран', 'Повторная встреча у реки']);
   const masks = history.map((o) => o.photos[0].annotation);
   assert.deepEqual(
     masks.map((a) => a.horse_polygon[0]),

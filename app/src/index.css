@@ -1233,6 +1233,9 @@ option:checked > .option-check {
   border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
 }
+.observation-comment {
+  white-space: pre-wrap;
+}
 .facts dt {
   color: var(--muted);
 }

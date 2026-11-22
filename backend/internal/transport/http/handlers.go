@@ -168,6 +168,7 @@ func patchHorse(d Deps) http.HandlerFunc {
 // --- observations ---
 
 type createObservationOption struct {
+	Comment    string    `json:"comment"`
 	HorseID    string    `json:"horse_id"`
 	ObservedAt time.Time `json:"observed_at"`
 	Location   string    `json:"location"`
@@ -201,6 +202,7 @@ func createObservation(d Deps) http.HandlerFunc {
 		}
 		o := domain.Observation{
 			ID:         uuid.Must(uuid.NewV7()).String(),
+			Comment:    strings.TrimSpace(form.Comment),
 			HorseID:    form.HorseID,
 			NodeID:     d.NodeID,
 			ObservedAt: form.ObservedAt.UTC(),

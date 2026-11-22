@@ -28,9 +28,10 @@ export interface ComparisonResult {
     }[];
   }[];
 }
-export type ComparisonDecision =
-  | { action: 'match'; horse_id: string; observation_name: string }
-  | { action: 'create_horse'; horse_name: string; observation_name: string };
+export type ComparisonDecision = { observation_name: string; comment?: string } & (
+  | { action: 'match'; horse_id: string }
+  | { action: 'create_horse'; horse_name: string }
+);
 export interface DecisionResult {
   observation_id: string;
   horse_id: string;
@@ -52,6 +53,7 @@ export interface ObservationPhoto {
 }
 // The history route enriches the existing observation, retaining its stable id and blob_ids.
 export interface NodeObservation {
+  comment?: string;
   id: string;
   horse_id?: string;
   observed_at: string;

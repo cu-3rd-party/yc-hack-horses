@@ -31,6 +31,7 @@ export interface GeoLocation {
 }
 
 export interface Observation {
+  comment?: string;
   id: string;
   horse_id?: string | null;
   node_id: string;
@@ -84,6 +85,7 @@ export interface HorseUpsertPayload {
 }
 
 export interface ObservationCreatePayload {
+  comment?: string;
   horse_id?: string | null;
   observed_at?: ISO8601;
   location?: GeoLocation | null;

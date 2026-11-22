@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,6 +121,7 @@ func loadOrCreateNodeID(dataDir string) (string, error) {
 
 // observationInput — форма наблюдения (соответствует POST /api/v1/observations).
 type observationInput struct {
+	Comment    string   `json:"comment"`
 	HorseID    string   `json:"horse_id"`
 	ObservedAt string   `json:"observed_at"` // RFC3339; пусто = текущее время
 	Location   string   `json:"location"`
@@ -160,6 +162,7 @@ func AppendObservation(payloadJSON string) (string, error) {
 	}
 	o := domain.Observation{
 		ID:         uuid.Must(uuid.NewV7()).String(),
+		Comment:    strings.TrimSpace(in.Comment),
 		HorseID:    in.HorseID,
 		NodeID:     c.nodeID,
 		ObservedAt: observedAt,

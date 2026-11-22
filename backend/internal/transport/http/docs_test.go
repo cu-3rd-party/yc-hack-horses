@@ -133,6 +133,7 @@ func TestScalarEnabled(t *testing.T) {
 		"/api/v1/horses":                  {"get", "post"},
 		"/api/v1/horses/{id}":             {"get", "patch"},
 		"/api/v1/observations":            {"get", "post"},
+		"/api/v1/observations/{id}":       {"delete"},
 		"/api/v1/comparisons":             {"post"},
 		"/api/v1/comparisons/{id}/cancel": {"post"},
 		"/api/v1/comparisons/{id}/detections/{detection}/decision": {"put"},
