@@ -5,6 +5,7 @@
 !backend/cmd/**
 !backend/internal/**
 !backend/migrations/**
+!infra/scripts/download-yolo-model.sh
 !packages/contracts/src/**
 !app/package.json
 !app/package-lock.json
