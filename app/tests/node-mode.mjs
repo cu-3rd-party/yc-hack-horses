@@ -255,7 +255,7 @@ try {
     assert.deepEqual(await read('/observations'), [], 'Use a fresh, disposable test node');
     assert.deepEqual(await read('/horses'), []);
     await launch(target.origin);
-    await nav('Галерея особей');
+    await nav('Особи');
     await page.getByText('0 в каталоге').waitFor();
     const horse = await (
       await fetch(api + '/horses', {
@@ -287,7 +287,7 @@ try {
     await nav('Распознавание');
     await upload();
     await page.getByText('Сравнение недоступно на этой ноде.').waitFor();
-    await nav('Галерея особей');
+    await nav('Особи');
     await page.getByRole('button', { name: /Живая нода/ }).click();
     await page.locator('.photo-card img').waitFor();
     console.log(

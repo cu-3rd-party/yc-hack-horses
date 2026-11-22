@@ -1,5 +1,6 @@
 import axios, { AxiosError, type AxiosAdapter } from 'axios';
 import { openDB, type DBSchema } from 'idb';
+import type { HorsePassportUpload } from '../../../packages/contracts/src';
 import { initialBook, pairMarks, samplePhoto, singleMark, uploadedPhoto } from './fixtures';
 import {
   validName,
@@ -14,19 +15,27 @@ import {
 interface Archive extends DBSchema {
   notebook: { key: string; value: Notebook };
   media: { key: string; value: ImportPhoto };
+  passports: { key: string; value: Blob };
 }
 let connection: ReturnType<typeof openDB<Archive>> | undefined;
 function database() {
-  return (connection ??= openDB<Archive>('takhi-field-journal', 1, {
-    upgrade(db) {
-      db.createObjectStore('notebook');
-      db.createObjectStore('media');
+  return (connection ??= openDB<Archive>('takhi-field-journal', 2, {
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        db.createObjectStore('notebook');
+        db.createObjectStore('media');
+      }
+      if (oldVersion < 2) db.createObjectStore('passports');
     },
   }));
 }
 export async function readMedia(id: string) {
   return (await database()).get('media', id);
 }
+export async function readDemoPassport(horseId: string) {
+  return (await database()).get('passports', horseId);
+}
+export type PassportInput = { horseId: string } & Pick<HorsePassportUpload, 'file'>;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const uid = () => crypto.randomUUID();
 type Preferences = Partial<Pick<Notebook, 'online' | 'failNextSave'>>;
@@ -35,6 +44,7 @@ interface Commands {
   '/decisions': Decision;
   '/analysis/cancel': { reviewId: string };
   '/manual': ManualInput;
+  '/passport': PassportInput;
   '/preferences': Preferences;
   '/sync': undefined;
   '/reset': undefined;
@@ -42,10 +52,14 @@ interface Commands {
 function checkName(name: string) {
   if (!validName(name)) throw new Error('Введите допустимое название файла.');
 }
+async function passportHash(file: File) {
+  const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 async function localRequest(route: string, payload: unknown): Promise<Notebook> {
   const db = await database();
-  // One transaction commits media, observations, queue entries and the remaining detections together.
-  const tx = db.transaction(['notebook', 'media'], 'readwrite');
+  const sha = route === '/passport' ? await passportHash((payload as PassportInput).file) : '';
+  const tx = db.transaction(['notebook', 'media', 'passports'], 'readwrite');
   const books = tx.objectStore('notebook'),
     media = tx.objectStore('media');
   let book = (await books.get('current')) ?? initialBook();
@@ -60,7 +74,7 @@ async function localRequest(route: string, payload: unknown): Promise<Notebook> 
     return uploadedPhoto(key, file.filename);
   }
   try {
-    if ((route === '/decisions' || route === '/manual') && book.failNextSave) {
+    if ((route === '/decisions' || route === '/manual' || route === '/passport') && book.failNextSave) {
       book.failNextSave = false;
       feedback = 'Демонстрационная ошибка сохранения. Повторите попытку.';
     } else
@@ -194,6 +208,17 @@ async function localRequest(route: string, payload: unknown): Promise<Notebook> 
           book.pending.push(id);
           break;
         }
+        case '/passport': {
+          const { horseId, file } = payload as PassportInput;
+          const horse = book.horses.find(h => h.id === horseId);
+          if (!horse) throw new Error('Особь недоступна.');
+          const passports = tx.objectStore('passports');
+          const old = await passports.get(horse.id);
+          await passports.put(file, horse.id);
+          horse.passportSha256 = sha;
+          book.mediaBytes = (book.mediaBytes ?? 0) + file.size - (old?.size ?? 0);
+          break;
+        }
         case '/preferences':
           Object.assign(book, payload as Preferences);
           break;
@@ -210,6 +235,7 @@ async function localRequest(route: string, payload: unknown): Promise<Notebook> 
           break;
         case '/reset':
           await media.clear();
+          await tx.objectStore('passports').clear();
           book = initialBook();
           break;
         default:

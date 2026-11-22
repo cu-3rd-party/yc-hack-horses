@@ -1,3 +1,4 @@
+import type { Horse, HorseMetadata, HorsePassportUpload } from '../../../packages/contracts/src';
 import type {
   CancelResult,
   ComparisonDecision,
@@ -22,6 +23,21 @@ import {
 } from './types';
 
 const root = '/api/v1';
+const passportPath = (id: string) => '/horses/' + encodeURIComponent(id) + '/passport';
+
+export async function readNodePassport(id: string, signal: AbortSignal) {
+  const response = await fetch(root + passportPath(id), { signal, cache: 'no-cache' });
+  if (response.status === 404) return undefined;
+  if (!response.ok) throw new Error('Не удалось загрузить паспорт.');
+  return response.blob();
+}
+
+export function uploadNodePassport(id: string, { file, studbook_number }: HorsePassportUpload) {
+  const form = new FormData();
+  form.append('file', file);
+  if (studbook_number) form.append('studbook_number', studbook_number);
+  return request<Horse>(passportPath(id), 'PUT', form);
+}
 export const desktop = globalThis.location?.protocol === 'journal:';
 const unavailable = desktop ? 'Локальная нода недоступна' : 'Сервер журнала недоступен';
 class NodeError extends Error {
@@ -154,7 +170,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
   });
   if (!node?.node_id || !node.driver) throw new Error(unavailable);
   const [horses, observations, blobs] = await Promise.all([
-    request<{ id: string; metadata?: { name?: string; nickname?: string } }[]>(
+    request<{ id: string; metadata?: HorseMetadata }[]>(
       '/horses',
       'GET',
       undefined,
@@ -174,6 +190,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
     horses: horses.map((h) => ({
       id: h.id,
       name: h.metadata?.name || h.metadata?.nickname || h.id,
+      passportSha256: h.metadata?.passport_sha256,
     })),
     observations: observations.map((o) => observation(o, hashes)),
     review: null,

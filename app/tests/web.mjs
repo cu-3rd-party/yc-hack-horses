@@ -20,8 +20,8 @@ try {
   await page.goto(url.href);
   const catalog = await (await horses).json();
   await heading('Новое наблюдение');
-  await nav('Галерея особей');
-  await heading('Галерея особей');
+  await nav('Особи');
+  await heading('Особи');
   await page.getByText(catalog.length + ' в каталоге', { exact: true }).waitFor();
   await nav('Настройки');
   await page.getByText('Сервер журнала · ' + url.host, { exact: true }).waitFor();

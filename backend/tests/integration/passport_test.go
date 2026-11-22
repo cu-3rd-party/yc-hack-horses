@@ -63,6 +63,25 @@ func TestHorsePassportPDF(t *testing.T) {
 	require.Contains(t, got.Header().Get("Content-Disposition"), "inline;")
 	require.Contains(t, got.Header().Get("Content-Disposition"), "filename*=UTF-8''7706-%D0%91")
 	require.Equal(t, `"`+sha+`"`, got.Header().Get("ETag"))
+	require.Equal(t, "private, no-cache", got.Header().Get("Cache-Control"))
+
+	for _, extraField := range []string{"file", "extra"} {
+		var body bytes.Buffer
+		form := multipart.NewWriter(&body)
+		for _, field := range []string{"file", extraField} {
+			part, err := form.CreateFormFile(field, "new.pdf")
+			require.NoError(t, err)
+			_, err = part.Write([]byte("%PDF-1.7 new"))
+			require.NoError(t, err)
+		}
+		require.NoError(t, form.Close())
+		req := NewRequestWithBody(t, http.MethodPut, passportURL, &body)
+		req.Header.Set("Content-Type", form.FormDataContentType())
+		MakeRequest(t, req, http.StatusBadRequest)
+	}
+	require.Equal(t, http.StatusUnsupportedMediaType,
+		uploadPassport(t, horse.ID, "invalid.pdf", []byte("wrong format"), "").Code)
+	require.Equal(t, pdf, MakeRequest(t, NewRequest(t, http.MethodGet, passportURL), http.StatusOK).Body.Bytes())
 
 	// условный запрос
 	cond := NewRequest(t, http.MethodGet, passportURL)

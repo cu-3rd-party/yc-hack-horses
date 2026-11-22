@@ -86,8 +86,8 @@ try {
   assert.ok(expandedBounds.x + expandedBounds.width <= workspace.x);
   await button('Свернуть меню').click();
   assert.equal((await sidebar.boundingBox()).width, 80);
-  await nav('Галерея особей');
-  assert.equal(await button('Галерея особей').getAttribute('aria-current'), 'page');
+  await nav('Особи');
+  assert.equal(await button('Особи').getAttribute('aria-current'), 'page');
   await nav('Распознавание');
   await button('Развернуть меню').click();
   assert.equal((await sidebar.boundingBox()).width, expandedBounds.width);
@@ -203,13 +203,13 @@ try {
   await page.locator('.toast').waitFor({ state: 'detached' });
   await match('Две особи — вторая.jpg', true);
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
-  await nav('Галерея особей');
+  await nav('Особи');
   await snap('gallery');
   await page.getByRole('button', { name: /Искра/ }).click();
   await page.getByRole('button', { name: /Две особи — вторая/ }).click();
   await dialog().getByRole('heading', { name: 'Две особи — вторая.jpg' }).waitFor();
   await page.keyboard.press('Escape');
-  await button('Назад в галерею').click();
+  await button('Назад к особям').click();
   await page.getByRole('button', { name: /Алтай/ }).click();
   await page.getByRole('button', { name: /Алтай — на выпасе/ }).click();
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -313,7 +313,7 @@ try {
   await app.close();
   app = null;
   await launch();
-  await nav('Галерея особей');
+  await nav('Особи');
   await page.getByRole('button', { name: /Сарана/ }).click();
   const galleryQuality = page.getByRole('combobox', { name: 'Качество' });
   await galleryQuality.click();
@@ -329,7 +329,7 @@ try {
   await button('Сбросить демо').click();
   await dialog().getByRole('button', { name: 'Восстановить', exact: true }).click();
   await dialog().waitFor({ state: 'hidden' });
-  await nav('Галерея особей');
+  await nav('Особи');
   assert.equal(await page.locator('.herd-card').count(), 4);
   await nav('Распознавание');
   await page.getByRole('button', { name: /На выпасе/ }).click();

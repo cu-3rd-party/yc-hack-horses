@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -31,8 +32,18 @@ func putHorsePassport(d Deps) http.HandlerFunc {
 			notFoundOrServerError(w, err, "horse")
 			return
 		}
-		if err := r.ParseMultipartForm(maxBlobSize); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBlobSize+(1<<20))
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) || errors.Is(err, multipart.ErrMessageTooLarge) {
+				writeError(w, http.StatusRequestEntityTooLarge, "passport too large")
+				return
+			}
 			writeError(w, http.StatusBadRequest, "multipart form required")
+			return
+		}
+		if len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["file"]) != 1 {
+			writeError(w, http.StatusBadRequest, `exactly one PDF in field "file" required`)
 			return
 		}
 		file, header, err := r.FormFile("file")
@@ -92,6 +103,7 @@ func putHorsePassport(d Deps) http.HandlerFunc {
 // getHorsePassport — GET /api/v1/horses/{id}/passport: PDF для просмотра в браузере.
 func getHorsePassport(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, no-cache")
 		h, err := d.Store.GetHorse(r.Context(), chi.URLParam(r, "id"))
 		if err != nil {
 			notFoundOrServerError(w, err, "horse")

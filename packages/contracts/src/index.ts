@@ -14,6 +14,14 @@ export interface Horse {
   metadata: HorseMetadata;
 }
 
+/** PUT /api/v1/horses/{id}/passport, multipart/form-data. Returns the updated Horse. */
+export interface HorsePassportUpload {
+  file: File;
+  studbook_number?: string;
+}
+
+export const MAX_PASSPORT_BYTES = 50 * 1024 * 1024;
+
 export interface HorseMetadata {
   name?: string;
   nickname?: string;
