@@ -80,9 +80,14 @@ func applyProjections(ctx context.Context, tx *sqlstore.Store, events []domain.E
 		case domain.EventBlobRegistered:
 			err = projectBlobRegistered(ctx, tx, ev)
 		case domain.EventBlobDeleted:
-			var sha string
-			sha, err = projectBlobDeleted(ctx, tx, ev)
-			if err == nil {
+			var (
+				sha string
+				n   int64
+			)
+			sha, n, err = projectBlobDeleted(ctx, tx, ev)
+			// Файл трогаем только если удаление реально применилось: устаревшее
+			// событие (блоб перерегистрирован позже) не повод удалять с диска.
+			if err == nil && n > 0 {
 				prune = append(prune, sha)
 			}
 		default:
@@ -154,32 +159,34 @@ func projectBlobRegistered(ctx context.Context, tx *sqlstore.Store, ev domain.Ev
 	if b.ID == "" {
 		b.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("blob:"+b.SHA256)).String()
 	}
-	if _, err := tx.UpsertBlob(ctx, b); err != nil {
+	if _, err := tx.UpsertBlobAt(ctx, b, ev.OccurredAt); err != nil {
 		return fmt.Errorf("upsert blob: %w", err)
 	}
 	return nil
 }
 
 // projectBlobDeleted: мягко удаляет блоб и помечает наблюдения с этим фото
-// неактуальными (их вектора выпадают из сравнения). Повторная доставка — no-op.
-// Возвращает sha256 для попытки удаления файла после коммита.
-func projectBlobDeleted(ctx context.Context, tx *sqlstore.Store, ev domain.Event) (string, error) {
+// неактуальными (их вектора выпадают из сравнения). Повторная доставка или
+// удаление старше последней регистрации — no-op (n == 0), файл не трогаем.
+// Возвращает sha256 и число изменённых строк блоба.
+func projectBlobDeleted(ctx context.Context, tx *sqlstore.Store, ev domain.Event) (string, int64, error) {
 	var p domain.BlobDeleted
 	if err := json.Unmarshal(ev.Payload, &p); err != nil {
-		return "", fmt.Errorf("decode blob.deleted payload: %w", err)
+		return "", 0, fmt.Errorf("decode blob.deleted payload: %w", err)
 	}
 	if p.SHA256 == "" {
 		p.SHA256 = ev.AggregateID
 	}
 	if !storage.ValidSha256Hex(p.SHA256) {
-		return "", fmt.Errorf("invalid sha256 %q", p.SHA256)
+		return "", 0, fmt.Errorf("invalid sha256 %q", p.SHA256)
 	}
 	deletedAt := p.DeletedAt
 	if deletedAt.IsZero() {
 		deletedAt = ev.OccurredAt
 	}
-	if _, err := tx.ProjectBlobDeleted(ctx, p.SHA256, deletedAt, p.Reason); err != nil {
-		return "", fmt.Errorf("project blob.deleted: %w", err)
+	n, err := tx.ProjectBlobDeleted(ctx, p.SHA256, deletedAt, p.Reason)
+	if err != nil {
+		return "", 0, fmt.Errorf("project blob.deleted: %w", err)
 	}
-	return p.SHA256, nil
+	return p.SHA256, n, nil
 }

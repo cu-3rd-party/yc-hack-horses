@@ -132,7 +132,9 @@ func TestDeleteBlobInvalidatesObservation(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(after), &afterObs), "after json")
 	require.True(t, afterObs.Invalidated, "expected invalidated after delete: %s", after)
 	require.NotEqual(t, "", afterObs.InvalidatedAt, "expected invalidated_at: %s", after)
-	require.Equal(t, "user requested", afterObs.InvalidationReason, "unexpected reason: %s", after)
+	// Причина инвалидации — единый формат ядра: "blob deleted: <sha> (<reason>)".
+	reasonPrefix := "blob deleted: " + sha + " ("
+	require.Equal(t, reasonPrefix+"user requested)", afterObs.InvalidationReason, "unexpected reason: %s", after)
 
 	// список наблюдений тоже отдаёт неактуальную запись с полями инвалидации
 	listJSON, err := ListObservations("")
@@ -225,9 +227,10 @@ func TestDeleteBlobReasonTrimAndTruncate(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(after), &afterObs), "after json")
 
+	reasonPrefix := "blob deleted: " + sha + " ("
 	got := []rune(afterObs.InvalidationReason)
-	require.Len(t, got, maxReasonLen, "reason must be truncated to %d runes: %q", maxReasonLen, afterObs.InvalidationReason)
-	require.Equal(t, strings.Repeat("я", maxReasonLen), afterObs.InvalidationReason,
+	require.Len(t, got, len([]rune(reasonPrefix))+maxReasonLen+1, "reason must be truncated to %d runes: %q", maxReasonLen, afterObs.InvalidationReason)
+	require.Equal(t, reasonPrefix+strings.Repeat("я", maxReasonLen)+")", afterObs.InvalidationReason,
 		"reason must keep only the leading runes, no edge spaces: %q", afterObs.InvalidationReason)
 	require.Equal(t, afterObs.InvalidationReason, strings.TrimSpace(afterObs.InvalidationReason),
 		"reason must not have edge spaces: %q", afterObs.InvalidationReason)
@@ -253,7 +256,8 @@ func TestDeleteBlobReasonTruncationTrimsBoundarySpace(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(after), &afterObs), "after json")
 
-	require.Equal(t, strings.Repeat("я", maxReasonLen-1), afterObs.InvalidationReason,
+	reasonPrefix := "blob deleted: " + sha + " ("
+	require.Equal(t, reasonPrefix+strings.Repeat("я", maxReasonLen-1)+")", afterObs.InvalidationReason,
 		"boundary space must be trimmed after truncation: %q", afterObs.InvalidationReason)
 	require.Equal(t, afterObs.InvalidationReason, strings.TrimSpace(afterObs.InvalidationReason),
 		"reason must not end with a space: %q", afterObs.InvalidationReason)

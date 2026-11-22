@@ -15,11 +15,13 @@ import (
 
 // GetBlobByID возвращает метаданные блоба по blobs.id ИЛИ по sha256
 // (клиенты uploadBlob получают только sha256, поэтому допускаем оба).
+// Сравнение id/sha256 — через LOWER с обеих сторон (единый подход пакета):
+// sha256 мог быть сохранён в верхнем регистре, а idOrSHA приходит в любом.
 func (s *Store) GetBlobByID(ctx context.Context, idOrSHA string) (domain.Blob, error) {
 	var b domain.Blob
 	var created int64
 	err := s.queryRow(ctx,
-		`SELECT id, sha256, mime_type, size, created_at FROM blobs WHERE (id = ? OR sha256 = ?) AND deleted_at = 0 ORDER BY id LIMIT 1`,
+		`SELECT id, sha256, mime_type, size, created_at FROM blobs WHERE (LOWER(id) = LOWER(?) OR LOWER(sha256) = LOWER(?)) AND deleted_at = 0 ORDER BY id LIMIT 1`,
 		idOrSHA, idOrSHA,
 	).Scan(&b.ID, &b.SHA256, &b.MimeType, &b.Size, &created)
 	if err != nil {
@@ -95,17 +97,30 @@ func (s *Store) ListSimilarTraitSnapshots(ctx context.Context, fingerprint, excl
 }
 
 // FindSnapshotByBlobSHA — снимок, привязанный к наблюдению с данным sha256
-// блоба (observations.blob_ids — JSON-массив идентификаторов/хэшей блобов).
+// блоба. observations.blob_ids — JSON-массив идентификаторов (blobs.id, UUIDv7)
+// или legacy-хэшей; ссылка резолвится тем же blobRefPatterns, что и при удалении,
+// поэтому находятся оба варианта. Сравнение — по LOWER(CAST(blob_ids AS TEXT)):
+// сырой LIKE по JSONB в postgres падает (jsonb ~~ unknown), а регистрозависимость
+// LIKE ломала бы поиск по верхнему регистру. Ссылочное условие обёрнуто в
+// скобки: цепочка OR (шаблон sha256 + шаблоны blobs.id) как единое целое, иначе
+// фильтр invalidated_at применялся бы только к последнему OR и снимки
+// инвалидированных наблюдений протекали бы в поиск похожих.
 func (s *Store) FindSnapshotByBlobSHA(ctx context.Context, sha string) (domain.TraitSnapshot, error) {
+	patterns, err := s.blobRefPatterns(ctx, sha)
+	if err != nil {
+		return domain.TraitSnapshot{}, err
+	}
+	if len(patterns) == 0 {
+		return domain.TraitSnapshot{}, storage.ErrNotFound
+	}
+	cond, args := likeAnyOf(blobIDsText, patterns)
 	row := s.queryRow(ctx,
 		`SELECT ts.id, ts.observation_id, ts.model_version, ts.traits, ts.raw_predicted_traits,
 		        ts.confidence, ts.fingerprint, ts.confirmed, ts.edited
 		 FROM trait_snapshots ts
 		 JOIN observations o ON ts.observation_id = o.id
-		 WHERE o.blob_ids LIKE ?
-		 ORDER BY ts.id LIMIT 1`,
-		`%`+jsonEscape(sha)+`%`,
-	)
+		 WHERE (`+cond+`) AND COALESCE(o.invalidated_at, 0) = 0
+		 ORDER BY ts.id LIMIT 1`, args...)
 	return scanTraitSnapshot(row)
 }
 
@@ -135,11 +150,4 @@ func scanTraitSnapshotRow(r rowScanner) (domain.TraitSnapshot, error) {
 	ts.Confirmed = confirmed
 	ts.Edited = edited
 	return ts, nil
-}
-
-// jsonEscape экранирует строку для безопасного LIKE-поиска внутри JSON-текста
-// (двойные кавычки вокруг значения, чтобы не матчить подстроки).
-func jsonEscape(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
 }

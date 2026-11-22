@@ -237,16 +237,18 @@ func TestBlobDeletedSimilarPaths(t *testing.T) {
 	require.Contains(t, resp.Body.String(), "blob not found")
 	MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/inference/similar?blob_id="+blobID), http.StatusNotFound)
 
-	// ре-аплоад: фактическое поведение — 200, источник = снимок инвалидированного наблюдения
+	// ре-аплоад: сам блоб снова доступен, но снимок признаков живёт только у
+	// ИНВАЛИДИРОВАННОГО наблюдения, а FindSnapshotByBlobSHA фильтрует такие
+	// снимки (ядро loop-1: invalidated_at = 0 в join) — источника для поиска нет.
 	reupload, reuploaded := uploadTestBlob(t, deletedPathPNG(t, 301))
 	require.Equal(t, http.StatusCreated, reupload.Code)
 	require.Equal(t, blob.SHA256, reuploaded.SHA256)
 
-	afterReupload := DecodeJSON[similarResponse](t, MakeRequest(t,
-		NewRequest(t, http.MethodGet, "/api/v1/inference/similar?blob_id="+blob.SHA256+"&limit=5"), http.StatusOK))
-	require.Equal(t, srcConfirmed.Fingerprint, afterReupload.Query, "источник — снимок инвалидированного наблюдения")
-	require.Len(t, afterReupload.Results, 1)
-	require.Equal(t, sibling.ID, afterReupload.Results[0].ID)
+	MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/blobs/"+blob.SHA256), http.StatusOK)
+
+	resp = MakeRequest(t, NewRequest(t, http.MethodGet, "/api/v1/inference/similar?blob_id="+blob.SHA256+"&limit=5"), http.StatusNotFound)
+	require.Contains(t, resp.Body.String(), "trait snapshot for blob not found",
+		"снимок инвалидированного наблюдения не используется как источник")
 }
 
 // TestBlobDeletedComparisonPaths: путь similarity POST /api/v1/comparisons
@@ -316,7 +318,7 @@ func TestBlobDeletedObservationInclude(t *testing.T) {
 	require.Equal(t, obs.ID, after[0].ID)
 	require.True(t, after[0].Invalidated)
 	require.NotNil(t, after[0].InvalidatedAt)
-	require.Equal(t, "review cleanup", after[0].InvalidationReason)
+	require.Equal(t, "blob deleted: "+blob.SHA256+" (review cleanup)", after[0].InvalidationReason)
 	require.Contains(t, after[0].BlobIDs, blob.SHA256, "ссылка на удалённый блоб сохраняется для аудита")
 	// фактическое поведение: photo-ссылка не вычищается из include=photos
 	require.Len(t, after[0].Photos, 1)
@@ -333,5 +335,5 @@ func TestBlobDeletedObservationInclude(t *testing.T) {
 		NewRequest(t, http.MethodGet, "/api/v1/observations?horse_id="+horse.ID), http.StatusOK))
 	require.Len(t, plain, 1)
 	require.True(t, plain[0].Invalidated)
-	require.Equal(t, "review cleanup", plain[0].InvalidationReason)
+	require.Equal(t, "blob deleted: "+blob.SHA256+" (review cleanup)", plain[0].InvalidationReason)
 }

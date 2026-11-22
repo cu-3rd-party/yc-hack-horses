@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -253,16 +254,30 @@ func (s *Store) CreateTraitSnapshot(ctx context.Context, ts domain.TraitSnapshot
 	return nil
 }
 
-// UpsertBlob регистрирует метаданные блоба; возвращает true, если блоб
-// зарегистрирован сейчас: первая регистрация или ре-аплоад после мягкого
-// удаления (deleted_at сбрасывается, событие blob.registered пишется заново).
+// UpsertBlob регистрирует метаданные блоба, считая временем регистрации «сейчас».
+// Локальный аплоад идёт через этот метод; события пиров — через UpsertBlobAt.
+// Возвращает true, если блоб зарегистрирован сейчас: первая регистрация или
+// ре-аплоад после мягкого удаления (deleted_at сбрасывается).
 func (s *Store) UpsertBlob(ctx context.Context, b domain.Blob) (bool, error) {
+	return s.UpsertBlobAt(ctx, b, timeNow())
+}
+
+// UpsertBlobAt — как UpsertBlob, но время регистрации берётся из события:
+// на пире регистрация могла случиться раньше, чем событие до нас доехало.
+// registered_at обновляется только при фактической вставке или оживлении строки:
+// повторная доставка blob.registered не должна «омолаживать» блоб и блокировать
+// более позднее удаление.
+func (s *Store) UpsertBlobAt(ctx context.Context, b domain.Blob, registeredAt time.Time) (bool, error) {
+	if registeredAt.IsZero() {
+		registeredAt = timeNow()
+	}
 	res, err := s.exec(ctx,
-		`INSERT INTO blobs (id, sha256, mime_type, size, created_at) VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO blobs (id, sha256, mime_type, size, created_at, registered_at) VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (sha256) DO UPDATE SET deleted_at = 0, delete_reason = '',
-		     mime_type = excluded.mime_type, size = excluded.size
+		     mime_type = excluded.mime_type, size = excluded.size,
+		     registered_at = excluded.registered_at
 		 WHERE blobs.deleted_at != 0`,
-		b.ID, b.SHA256, b.MimeType, b.Size, timeNow().UnixMilli(),
+		b.ID, b.SHA256, b.MimeType, b.Size, timeNow().UnixMilli(), registeredAt.UnixMilli(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("sqlstore: upsert blob %s: %w", b.SHA256, err)
@@ -274,12 +289,25 @@ func (s *Store) UpsertBlob(ctx context.Context, b domain.Blob) (bool, error) {
 	return n > 0, nil
 }
 
+// BlobDeleteClockSkew — допуск на расхождение часов между узлами при проверке
+// guard'а registered_at <= deletedAt. Часы отправителя удаления могут отставать
+// от часов регистратора: легитимное удаление свежего блоба штампуется временем
+// чуть меньше registered_at, и без допуска оно молча становилось бы no-op.
+// Сравниваем с запасом: registered_at <= deletedAt + skew.
+const BlobDeleteClockSkew = 5 * time.Minute
+
 // MarkBlobDeleted мягко удаляет блоб: строка остаётся ради ссылок наблюдений,
 // API перестаёт его отдавать. Повторная доставка события — no-op (0 строк).
+// Удаление, которое старше последней регистрации блоба (с допуском
+// BlobDeleteClockSkew на расхождение часов узлов), тоже no-op: так ретрай
+// sync не убивает блоб, перезалитый после удаления (re-upload -> revive).
+// Сравнение sha256 — через LOWER с обеих сторон (единый подход пакета):
+// sha256 мог быть сохранён в верхнем регистре, а удаление приходит в любом.
 func (s *Store) MarkBlobDeleted(ctx context.Context, sha string, deletedAt time.Time, reason string) (int64, error) {
 	res, err := s.exec(ctx,
-		`UPDATE blobs SET deleted_at = ?, delete_reason = ? WHERE sha256 = ? AND deleted_at = 0`,
-		deletedAt.UnixMilli(), reason, sha,
+		`UPDATE blobs SET deleted_at = ?, delete_reason = ?
+		 WHERE LOWER(sha256) = LOWER(?) AND deleted_at = 0 AND registered_at <= ?`,
+		deletedAt.UnixMilli(), reason, sha, deletedAt.Add(BlobDeleteClockSkew).UnixMilli(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("sqlstore: mark blob %s deleted: %w", sha, err)
@@ -322,43 +350,46 @@ func (s *Store) InvalidateObservationsByBlob(ctx context.Context, sha string, in
 	return n, nil
 }
 
-// observationIDsByBlob собирает id наблюдений, ссылающихся на блоб: через
-// blob_ids и через подтверждённые фото.
+// observationIDsByBlob собирает id наблюдений, ссылающихся на блоб. Записи
+// observations.blob_ids — это blobs.id (UUIDv7, так объявлено в OpenAPI), но
+// старые наблюдения хранили сам sha256, поэтому каждая запись резолвится через
+// таблицу blobs (id -> sha256), плюс остаётся прямая ссылка из observation_photos.
+// Скан ограничен одной колонкой и точным элементом JSON-массива (LIKE), а не
+// разбором всех наблюдений в Go.
 func (s *Store) observationIDsByBlob(ctx context.Context, sha string) ([]string, error) {
+	patterns, err := s.blobRefPatterns(ctx, sha)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]struct{}{}
 	var ids []string
-	rows, err := s.query(ctx, `SELECT id, blob_ids FROM observations WHERE blob_ids != '[]'`)
-	if err != nil {
-		return nil, fmt.Errorf("sqlstore: observations by blob %s: %w", sha, err)
-	}
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("sqlstore: scan observation blob_ids: %w", err)
+	if len(patterns) > 0 {
+		cond, args := likeAnyOf(blobIDsText, patterns)
+		rows, err := s.query(ctx,
+			`SELECT id FROM observations WHERE invalidated_at = 0 AND (`+cond+`)`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("sqlstore: observations by blob %s: %w", sha, err)
 		}
-		var blobIDs []string
-		if err := json.Unmarshal([]byte(raw), &blobIDs); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("sqlstore: parse observation blob_ids: %w", err)
-		}
-		for _, blobID := range blobIDs {
-			if strings.EqualFold(blobID, sha) {
-				if _, ok := seen[id]; !ok {
-					seen[id] = struct{}{}
-					ids = append(ids, id)
-				}
-				break
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("sqlstore: scan observation id: %w", err)
+			}
+			if _, ok := seen[id]; !ok {
+				seen[id] = struct{}{}
+				ids = append(ids, id)
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("sqlstore: observations by blob %s: %w", sha, err)
+		}
+		// sqlite работает на одном соединении: следующий запрос только после Close.
 		rows.Close()
-		return nil, fmt.Errorf("sqlstore: observations by blob %s: %w", sha, err)
 	}
-	rows.Close()
 
-	photoRows, err := s.query(ctx, `SELECT DISTINCT observation_id FROM observation_photos WHERE sha256 = ?`, sha)
+	photoRows, err := s.query(ctx, `SELECT DISTINCT observation_id FROM observation_photos WHERE LOWER(sha256) = LOWER(?)`, sha)
 	if err != nil {
 		return nil, fmt.Errorf("sqlstore: photo observations by blob %s: %w", sha, err)
 	}
@@ -379,30 +410,143 @@ func (s *Store) observationIDsByBlob(ctx context.Context, sha string) ([]string,
 	return ids, nil
 }
 
+// blobRefPatterns — LIKE-шаблоны ссылки на блоб в observations.blob_ids:
+// сам sha256 (legacy-записи) и все blobs.id с этим sha256 (OpenAPI: blob_ids —
+// это blobs.id, то есть UUIDv7).
+func (s *Store) blobRefPatterns(ctx context.Context, sha string) ([]string, error) {
+	var patterns []string
+	seen := map[string]struct{}{}
+	add := func(id string) {
+		p, ok := blobIDPattern(id)
+		if !ok {
+			return
+		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		patterns = append(patterns, p)
+	}
+	add(sha)
+	// LOWER с обеих сторон: sha256 мог быть сохранён в верхнем регистре (валиден
+	// по ValidSha256Hex), а удаление/проверка ссылок приходят в любом регистре.
+	rows, err := s.query(ctx, `SELECT id FROM blobs WHERE LOWER(sha256) = LOWER(?)`, sha)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: blob ids for %s: %w", sha, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("sqlstore: scan blob id: %w", err)
+		}
+		add(id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: blob ids for %s: %w", sha, err)
+	}
+	return patterns, nil
+}
+
+// blobIDPattern — LIKE-шаблон точного элемента JSON-массива: %"<id>"%.
+// Значение с посторонними символами отбрасывается: подставлять в LIKE шаблонные
+// % и _ нельзя, а реальные идентификаторы — только hex и дефис. Идентификатор
+// приводится к нижнему регистру: сравнение идёт по LOWER(blob_ids) (см.
+// blobIDsText), поэтому верхний регистр sha256/UUID не ломает поиск ни в
+// sqlite, ни в postgres.
+func blobIDPattern(id string) (string, bool) {
+	if id == "" {
+		return "", false
+	}
+	for _, r := range id {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f', r >= 'A' && r <= 'F', r == '-':
+		default:
+			return "", false
+		}
+	}
+	return `%"` + strings.ToLower(id) + `"%`, true
+}
+
+// blobIDsText — колонка blob_ids как текст, приведённая к нижнему регистру:
+// в sqlite это TEXT, в postgres JSONB (LIKE по JSONB не работает без CAST).
+// LIKE в postgres регистрозависим, а sha256/UUID в blob_ids могут быть в верхнем
+// регистре, поэтому LOWER применяется и к колонке, и к шаблонам (blobIDPattern) —
+// единый подход для обоих драйверов. Оговорка: LIKE с ведущим % индекса не
+// использует, это full scan по observations; вызовы редки (удаление/проверка
+// ссылок), поэтому цена приемлема.
+const blobIDsText = "LOWER(CAST(blob_ids AS TEXT))"
+
+// likeAnyOf собирает условие "col LIKE ? OR col LIKE ?" из шаблонов.
+func likeAnyOf(col string, patterns []string) (string, []any) {
+	conds := make([]string, 0, len(patterns))
+	args := make([]any, 0, len(patterns))
+	for _, p := range patterns {
+		conds = append(conds, col+" LIKE ?")
+		args = append(args, p)
+	}
+	return strings.Join(conds, " OR "), args
+}
+
 // ProjectBlobDeleted — проекция blob.deleted: мягко удаляет блоб и помечает
 // наблюдения с этим фото неактуальными. Обе записи в одной транзакции вызывающего.
+// Возвращает число реально изменённых строк блоба: 0 — событие повторное или
+// устаревшее (блоб перерегистрирован позже), тогда наблюдения не трогаем, а
+// вызывающий не должен пытаться удалять файл.
 func (s *Store) ProjectBlobDeleted(ctx context.Context, sha string, deletedAt time.Time, reason string) (int64, error) {
-	if _, err := s.MarkBlobDeleted(ctx, sha, deletedAt, reason); err != nil {
+	n, err := s.MarkBlobDeleted(ctx, sha, deletedAt, reason)
+	if err != nil {
 		return 0, err
 	}
-	return s.InvalidateObservationsByBlob(ctx, sha, deletedAt, reason)
+	if n == 0 {
+		slog.Debug("blob.deleted skipped: blob re-registered later or already deleted", "sha256", sha)
+		return 0, nil
+	}
+	if _, err := s.InvalidateObservationsByBlob(ctx, sha, deletedAt, InvalidationReason(sha, reason)); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// InvalidationReason собирает причину инвалидации: метка, sha256 удалённого
+// блоба и уточнение вызывающего, если оно не совпадает с меткой по умолчанию.
+// Экспортируется, чтобы все пути (HTTP deleteBlob/markBlobDeletedTx и проекция
+// blob.deleted) писали в observations.invalidation_reason одинаковый текст.
+func InvalidationReason(sha, reason string) string {
+	msg := "blob deleted: " + sha
+	if r := strings.TrimSpace(reason); r != "" && r != "blob deleted" {
+		msg += " (" + r + ")"
+	}
+	return msg
 }
 
 // BlobDeleted сообщает, помечен ли блоб (по sha256 или id) как удалённый, и когда.
 func (s *Store) BlobDeleted(ctx context.Context, idOrSHA string) (time.Time, bool, error) {
-	var deletedAt int64
-	err := s.queryRow(ctx, `SELECT deleted_at FROM blobs WHERE id = ? OR sha256 = ? ORDER BY deleted_at DESC LIMIT 1`,
-		idOrSHA, idOrSHA).Scan(&deletedAt)
+	_, deletedAt, deleted, err := s.blobDeletion(ctx, idOrSHA)
+	return deletedAt, deleted, err
+}
+
+// blobDeletion резолвит ссылку (blobs.id или sha256) в канонический sha256 и
+// возвращает метку удаления: по id из blob_ids нужно знать, какой это файл.
+// Сравнение id/sha256 — через LOWER с обеих сторон (единый подход пакета):
+// и id, и sha256 могли быть записаны в верхнем регистре (sha256 — валидно).
+func (s *Store) blobDeletion(ctx context.Context, idOrSHA string) (string, time.Time, bool, error) {
+	var (
+		sha       string
+		deletedAt int64
+	)
+	err := s.queryRow(ctx, `SELECT sha256, deleted_at FROM blobs WHERE LOWER(id) = LOWER(?) OR LOWER(sha256) = LOWER(?) ORDER BY deleted_at DESC LIMIT 1`,
+		idOrSHA, idOrSHA).Scan(&sha, &deletedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return time.Time{}, false, nil
+			return "", time.Time{}, false, nil
 		}
-		return time.Time{}, false, fmt.Errorf("sqlstore: blob %s deleted_at: %w", idOrSHA, err)
+		return "", time.Time{}, false, fmt.Errorf("sqlstore: blob %s deleted_at: %w", idOrSHA, err)
 	}
 	if deletedAt == 0 {
-		return time.Time{}, false, nil
+		return sha, time.Time{}, false, nil
 	}
-	return timeFromUnixMilli(deletedAt), true, nil
+	return sha, timeFromUnixMilli(deletedAt), true, nil
 }
 
 // InvalidateObservation помечает одно наблюдение неактуальным; уже помеченное — no-op.
@@ -426,14 +570,18 @@ func (s *Store) InvalidateObservation(ctx context.Context, id string, invalidate
 // наблюдение создаётся после удаления фото: события в журнале уже разошлись.
 func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observationID string, refs []string, reason string) (bool, error) {
 	for _, ref := range refs {
-		deletedAt, deleted, err := s.BlobDeleted(ctx, ref)
+		sha, deletedAt, deleted, err := s.blobDeletion(ctx, ref)
 		if err != nil {
 			return false, err
 		}
 		if !deleted {
 			continue
 		}
-		if _, err := s.InvalidateObservation(ctx, observationID, deletedAt, reason); err != nil {
+		// В причине — канонический sha256: по ссылке blobs.id не видно, какое фото выпало.
+		if sha == "" {
+			sha = ref
+		}
+		if _, err := s.InvalidateObservation(ctx, observationID, deletedAt, InvalidationReason(sha, reason)); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -442,34 +590,26 @@ func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observa
 }
 
 // BlobReferenced сообщает, ссылается ли на блоб хоть одно наблюдение:
-// observations.blob_ids (JSON-массив) или observation_photos.sha256.
-// По этим ссылкам файл нельзя удалять физически.
+// observations.blob_ids (запись — blobs.id или legacy sha256) или
+// observation_photos.sha256. По этим ссылкам файл нельзя удалять физически.
 func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
-	rows, err := s.query(ctx, `SELECT blob_ids FROM observations WHERE blob_ids != '[]'`)
+	patterns, err := s.blobRefPatterns(ctx, sha)
 	if err != nil {
-		return false, fmt.Errorf("sqlstore: blob %s references: %w", sha, err)
+		return false, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return false, fmt.Errorf("sqlstore: scan observation blob_ids: %w", err)
+	if len(patterns) > 0 {
+		cond, args := likeAnyOf(blobIDsText, patterns)
+		var n int64
+		if err := s.queryRow(ctx,
+			`SELECT COUNT(*) FROM (SELECT 1 FROM observations WHERE `+cond+` LIMIT 1) refs`, args...).Scan(&n); err != nil {
+			return false, fmt.Errorf("sqlstore: blob %s references: %w", sha, err)
 		}
-		var ids []string
-		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-			return false, fmt.Errorf("sqlstore: parse observation blob_ids: %w", err)
+		if n > 0 {
+			return true, nil
 		}
-		for _, id := range ids {
-			if strings.EqualFold(id, sha) {
-				return true, nil
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("sqlstore: blob %s references: %w", sha, err)
 	}
 	var n int64
-	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM observation_photos WHERE sha256 = ?`, sha).Scan(&n); err != nil {
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM observation_photos WHERE LOWER(sha256) = LOWER(?)`, sha).Scan(&n); err != nil {
 		return false, fmt.Errorf("sqlstore: blob %s photo references: %w", sha, err)
 	}
 	return n > 0, nil
@@ -494,9 +634,11 @@ func (s *Store) ListBlobs(ctx context.Context) ([]domain.Blob, error) {
 }
 
 // GetBlobMeta возвращает метаданные блоба по sha256; мягко удалённый — storage.ErrNotFound.
+// Сравнение sha256 — через LOWER с обеих сторон (единый подход пакета):
+// sha256 мог быть сохранён в верхнем регистре, а запрос приходит в любом.
 func (s *Store) GetBlobMeta(ctx context.Context, sha string) (domain.Blob, error) {
 	var b domain.Blob
-	err := s.queryRow(ctx, `SELECT id, sha256, mime_type, size FROM blobs WHERE sha256 = ? AND deleted_at = 0`, sha).
+	err := s.queryRow(ctx, `SELECT id, sha256, mime_type, size FROM blobs WHERE LOWER(sha256) = LOWER(?) AND deleted_at = 0`, sha).
 		Scan(&b.ID, &b.SHA256, &b.MimeType, &b.Size)
 	if err != nil {
 		return domain.Blob{}, notFound("blob", err)

@@ -56,7 +56,7 @@ func TestBlobDeleteEvent(t *testing.T) {
 	require.Equal(t, obs.ID, list[0].ID)
 	require.True(t, list[0].Invalidated)
 	require.NotNil(t, list[0].InvalidatedAt)
-	require.Equal(t, "test cleanup", list[0].InvalidationReason)
+	require.Equal(t, "blob deleted: "+blob.SHA256+" (test cleanup)", list[0].InvalidationReason)
 
 	// Повторный DELETE уже удалённого — 404 (событие не дублируется).
 	MakeRequest(t, NewRequest(t, http.MethodDelete, "/api/v1/blobs/"+blob.SHA256), http.StatusNotFound)

@@ -173,7 +173,7 @@ func TestProjectBlobDeleted_KeepsReferencedFile(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, obs.Invalidated)
 	require.NotNil(t, obs.InvalidatedAt)
-	require.Equal(t, "old photo", obs.InvalidationReason)
+	require.Equal(t, "blob deleted: "+sha+" (old photo)", obs.InvalidationReason)
 
 	present, err := blobs.Has(ctx, sha)
 	require.NoError(t, err)

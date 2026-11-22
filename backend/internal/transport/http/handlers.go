@@ -376,7 +376,8 @@ func markBlobDeletedTx(ctx context.Context, tx *sqlstore.Store, nodeID, sha stri
 	if n == 0 {
 		return domain.Event{}, errBlobAlreadyDeleted
 	}
-	if _, err := tx.InvalidateObservationsByBlob(ctx, sha, now, reason); err != nil {
+	// Причина инвалидации — единый формат ядра: "blob deleted: <sha> (<reason>)".
+	if _, err := tx.InvalidateObservationsByBlob(ctx, sha, now, sqlstore.InvalidationReason(sha, reason)); err != nil {
 		return domain.Event{}, err
 	}
 	return appendLocalEvent(ctx, tx, nodeID, domain.EventBlobDeleted, sha, mustJSON(payload))

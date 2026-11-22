@@ -147,8 +147,11 @@ func TestMigrationBlobDeletedOnFilledSQLite(t *testing.T) {
 		"photo-2", "obs-photoonly", shaDeleted, "фото", "{}", "ref-v1", "[]")
 	require.NoError(t, err)
 
-	// Накатываем 005 поверх заполненных таблиц.
+	// Накатываем 005 поверх заполненных таблиц, а следом 006_blob_registered_at:
+	// методы хранилища (MarkBlobDeleted/GetBlobMeta) читают registered_at, поэтому
+	// без неё сценарий «миграция на живом узле» не воспроизводится.
 	copyMigration(t, srcDir, migDir, "005_blob_deleted.sql")
+	copyMigration(t, srcDir, migDir, "006_blob_registered_at.sql")
 	require.NoError(t, migrate.Apply(ctx, db, migRoot, "sqlite"))
 
 	// Новые колонки появились.
