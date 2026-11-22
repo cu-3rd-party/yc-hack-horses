@@ -52,11 +52,15 @@ func TestLocalComparisonOrientsImageAndKeepsEachInstance(t *testing.T) {
 		require.Nil(t, box)
 		require.Equal(t, image.Rect(0, 0, 40, 20), input.Decoded.Bounds())
 		return []yolo.InstanceEmbedding{
-			{Box: image.Rect(10, 0, 30, 20), MaskPNG: mask, Confidence: .98,
+			{
+				Box: image.Rect(10, 0, 30, 20), MaskPNG: mask, Confidence: .98,
 				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{1, 0}},
-				Traits:    &reid.TraitEvidence{Values: map[string]float64{"coat_warmth": 1.5, "coat_light": .25, "head_ratio": 2}, Layers: map[string][]byte{"coat_light": head}}},
-			{Box: image.Rect(30, 0, 40, 10), MaskPNG: head, Confidence: .78,
-				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{0, 1}}},
+				Traits:    &reid.TraitEvidence{Values: map[string]float64{"coat_warmth": 1.5, "coat_light": .25, "head_ratio": 2}, Layers: map[string][]byte{"coat_light": head}},
+			},
+			{
+				Box: image.Rect(30, 0, 40, 10), MaskPNG: head, Confidence: .78,
+				Embedding: inference.EmbeddingResult{ModelVersion: "visual", Vector: []float32{0, 1}},
+			},
 		}, nil
 	})}
 	result, err := m.Analyze(t.Context(), data, "image/jpeg")
@@ -72,8 +76,8 @@ func TestLocalComparisonOrientsImageAndKeepsEachInstance(t *testing.T) {
 	require.Equal(t, []Trait{}, result[1].Annotation.Traits)
 	require.Equal(t, .98, result[0].Confidence)
 	require.Equal(t, .78, result[1].Confidence)
-	require.Equal(t, Descriptor{"visual", []float64{1, 0}}, result[0].Descriptor)
-	require.Equal(t, Descriptor{"visual", []float64{0, 1}}, result[1].Descriptor)
+	require.Equal(t, Descriptor{Version: "visual", Vector: []float64{1, 0}}, result[0].Descriptor)
+	require.Equal(t, Descriptor{Version: "visual", Vector: []float64{0, 1}}, result[1].Descriptor)
 }
 
 func TestMaskPolygonUsesLargestExterior(t *testing.T) {
@@ -82,6 +86,19 @@ func TestMaskPolygonUsesLargestExterior(t *testing.T) {
 	points, err := maskPolygon(mask, bounds, bounds)
 	require.NoError(t, err)
 	require.Equal(t, []Point{{0, 0}, {.75, 0}, {.75, .75}, {0, .75}}, points)
+}
+
+func TestLocalBoxRetrievalWithoutMask(t *testing.T) {
+	row := yolo.InstanceEmbedding{
+		Box: image.Rect(12, 24, 18, 32), Confidence: .8, MeasurementError: "part heads unavailable",
+		Embedding: inference.EmbeddingResult{ModelVersion: reid.BoxVersion, Vector: []float32{1, 0}},
+	}
+	p, err := localPrediction(row, image.Rect(10, 20, 20, 40))
+	require.NoError(t, err)
+	require.Equal(t, []Point{{.2, .2}, {.8, .2}, {.8, .6}, {.2, .6}}, p.Annotation.HorsePolygon)
+	require.Nil(t, p.Annotation.PartMask)
+	require.Empty(t, p.Annotation.Traits)
+	require.Equal(t, reid.BoxVersion, p.Version)
 }
 
 func TestLocalComparisonFailures(t *testing.T) {

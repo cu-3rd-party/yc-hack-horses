@@ -164,7 +164,7 @@ func New(cfg *config.Config) (*App, error) {
 	case "yolo":
 		modelPath := cfg.Inference.ModelPath
 		if modelPath == "" {
-			modelPath = filepath.Join(cfg.Node.DataDir, "models", "yolov8n.onnx")
+			modelPath = modelassets.DefaultDetectorPath(filepath.Join(cfg.Node.DataDir, "models"))
 		}
 		partsDir := cfg.Inference.ReIDModelDir
 		if partsDir == "" {

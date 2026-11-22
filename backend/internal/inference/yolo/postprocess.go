@@ -71,6 +71,31 @@ func decodeOutput(data []float32, classID int, confThreshold float64) []Detectio
 	return out
 }
 
+// YOLO26 emits xyxy, score, class. Keep overlapping horses, but collapse identical boxes.
+func decodeEndToEnd(data []float32, classID int, confThreshold float64) []Detection {
+	var out []Detection
+	for len(data) >= 6 {
+		row := data[:6]
+		data = data[6:]
+		if row[5] == float32(classID) && float64(row[4]) >= confThreshold {
+			out = append(out, Detection{
+				Box:        box{int(row[0]), int(row[1]), int(row[2]), int(row[3])},
+				Confidence: float64(row[4]), ClassID: classID,
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Confidence > out[j].Confidence })
+	seen := make(map[box]bool, len(out))
+	unique := out[:0]
+	for _, d := range out {
+		if !seen[d.Box] {
+			unique = append(unique, d)
+			seen[d.Box] = true
+		}
+	}
+	return unique
+}
+
 // nms — non-maximum suppression: убирает пересекающиеся боксы с IoU > threshold.
 // Вход уже отсортирован по убыванию уверенности.
 func nms(dets []Detection, iouThreshold float64) []Detection {

@@ -25,12 +25,11 @@ RUN go build -trimpath -ldflags '-s -w' -o /out/node ./cmd/node \
 FROM debian:bookworm-slim AS runtime
 # В образе только shared-библиотека onnxruntime (NuGet, 1.31.1). Сами веса
 # (yolov8n/dinov2/part-heads/megadescriptor) в образ НЕ запекаются — качаются
-# при старте менеджером modelassets в $DATA_DIR/models и живут на PVC.
+# при старте менеджером modelassets в /data/models и живут на существующем PVC.
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends curl python3 ca-certificates >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 COPY infra/scripts/download-yolo-model.sh /tmp/download-yolo-model.sh
-RUN MODELS_DIR=/out/models bash /tmp/download-yolo-model.sh \
-    && rm -f /out/models/yolov8n.onnx
+RUN ORT_ONLY=1 MODELS_DIR=/out/models bash /tmp/download-yolo-model.sh
 
 # distroless/cc: glibc и libgcc — чтобы libonnxruntime.so загружался dlopen'ом
 FROM gcr.io/distroless/cc-debian12:nonroot
@@ -43,7 +42,8 @@ COPY --from=builder /out/node /app/node
 COPY --from=web /src/app/dist /app/web
 COPY --from=runtime /out/models /app/models
 ENV WEB_DIR=/app/web DATA_DIR=/data DATABASE_URL=/data/node.db LISTEN_ADDR=0.0.0.0:8080 \
-    INFER_ENGINE=yolo INFER_RUNTIME_LIB=/app/models/libonnxruntime.so.1.31.1
+    INFER_ENGINE=yolo INFER_RUNTIME_LIB=/app/models/libonnxruntime.so.1.31.1 \
+    INFER_MODEL_PATH=/data/models/yolo26x.onnx INFER_REID_MODEL_DIR=/data/models
 WORKDIR /app
 VOLUME /data
 EXPOSE 8080

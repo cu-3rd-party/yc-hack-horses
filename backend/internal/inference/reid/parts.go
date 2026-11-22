@@ -110,7 +110,7 @@ func sampleAt(img *image.RGBA, box image.Rectangle, i, j, w, h int) (pixel, imag
 	}, point
 }
 
-func segmentedPixels(ctx context.Context, img *image.RGBA, box image.Rectangle, predict predictParts) ([]pixel, error) {
+func segmentedPixels(ctx context.Context, img *image.RGBA, box image.Rectangle, detail bool, predict predictParts) ([]pixel, error) {
 	coarse, err := predict(ctx, pad(box, img.Bounds(), .12))
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func segmentedPixels(ctx context.Context, img *image.RGBA, box image.Rectangle, 
 			headBox = headBox.Union(image.Rectangle{Min: p, Max: p.Add(image.Pt(1, 1))})
 		}
 	}
-	if !headBox.Empty() {
+	if detail && !headBox.Empty() {
 		detail, err := predict(ctx, pad(headBox, img.Bounds(), .25))
 		if err != nil {
 			return nil, err

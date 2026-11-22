@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
@@ -29,9 +30,11 @@ type candidate struct {
 	Score float64 `json:"similarity"`
 }
 type record struct {
+	CaptureTime      string              `json:"capture_time,omitempty"`
 	File             string              `json:"file"`
 	SHA              string              `json:"sha256"`
 	Box              [4]int              `json:"box"`
+	Confidence       float64             `json:"detection_confidence,omitempty"`
 	Source           string              `json:"source"`
 	Version          string              `json:"model_version,omitempty"`
 	MaskPNG          *[]byte             `json:"mask_png,omitempty"`
@@ -116,8 +119,8 @@ func parseBox(s string) (*image.Rectangle, error) {
 }
 
 func run(ctx context.Context) error {
-	dir := flag.String("models", os.Getenv("INFER_REID_MODEL_DIR"), "directory containing MegaDescriptor and optional part models")
-	det := flag.String("detector", os.Getenv("INFER_MODEL_PATH"), "YOLOv8n ONNX path")
+	dir := flag.String("models", os.Getenv("INFER_REID_MODEL_DIR"), "directory containing MegaDescriptor, DINOv2 and horse part heads")
+	det := flag.String("detector", os.Getenv("INFER_MODEL_PATH"), "COCO detector ONNX path (YOLOv8n or YOLO26x)")
 	lib := flag.String("runtime", os.Getenv("INFER_RUNTIME_LIB"), "ONNX Runtime shared library")
 	galleryPath := flag.String("gallery", "", "previous JSONL export to compare with")
 	boxText := flag.String("box", "", "single manually supplied box x0,y0,x1,y1 in decoded image coordinates (one input photo)")
@@ -183,7 +186,7 @@ func run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		r := record{File: file, SHA: fmt.Sprintf("%x", sha256.Sum256(data)), Source: "automatic"}
+		r := record{CaptureTime: comparison.CaptureTime(data), File: file, SHA: fmt.Sprintf("%x", sha256.Sum256(data)), Source: "automatic"}
 		rows, err := engine.EmbedInstances(ctx, inference.ImageInput{Reader: bytes.NewReader(data)}, region)
 		if errors.Is(err, inference.ErrNoAnimalDetected) {
 			r.Source = "missed"
@@ -199,6 +202,7 @@ func run(ctx context.Context) error {
 			r.Source = "provided_box"
 		}
 		for _, row := range rows {
+			r.Confidence = row.Confidence
 			r.Box = [4]int{row.Box.Min.X, row.Box.Min.Y, row.Box.Max.X, row.Box.Max.Y}
 			r.Version, r.Vector = row.Embedding.ModelVersion, row.Embedding.Vector
 			r.Traits, r.MeasurementError = row.Traits, row.MeasurementError

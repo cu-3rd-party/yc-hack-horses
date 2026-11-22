@@ -8,12 +8,14 @@ import (
 )
 
 const (
-	Version       = "megadescriptor-l384-visual-v1"
-	Dimension     = 1536
-	legacyVersion = "megadescriptor-l384-pascal-parts-physical-v1"
+	Version               = "megadescriptor-l384-silhouette-v1"
+	publishedHeadsVersion = "megadescriptor-l384-silhouette-v1-h17766f17"
+	BoxVersion            = "megadescriptor-l384-visual-v1"
+	Dimension             = 1536
+	legacyVersion         = "megadescriptor-l384-pascal-parts-physical-v1"
 )
 
-func visualEmbedding(values []float32) (inference.EmbeddingResult, error) {
+func visualEmbedding(values []float32, version string) (inference.EmbeddingResult, error) {
 	if len(values) != Dimension {
 		return inference.EmbeddingResult{}, fmt.Errorf("reid: expected %d visual coordinates", Dimension)
 	}
@@ -28,13 +30,13 @@ func visualEmbedding(values []float32) (inference.EmbeddingResult, error) {
 	for i, x := range values {
 		values[i] = float32(float64(x) / norm)
 	}
-	return inference.EmbeddingResult{ModelVersion: Version, Vector: values}, nil
+	return inference.EmbeddingResult{ModelVersion: version, Vector: values}, nil
 }
 
 // Old exports store the same visual block with a fixed scale, followed by ten trait coordinates.
 func squaredVisualNorm(e inference.EmbeddingResult) (float64, error) {
 	switch {
-	case e.ModelVersion == Version && len(e.Vector) == Dimension:
+	case (IsSilhouette(e.ModelVersion) || e.ModelVersion == BoxVersion) && len(e.Vector) == Dimension:
 		return 1, nil
 	case e.ModelVersion == legacyVersion && len(e.Vector) == Dimension+10:
 		return .9, nil
@@ -59,8 +61,17 @@ func Validate(e inference.EmbeddingResult) error {
 	return nil
 }
 
-// Similarity is the visual cosine for both new and archived descriptors.
+// IsSilhouette identifies MegaDescriptor versions encoded from the predicted foreground.
+func IsSilhouette(version string) bool {
+	return version == Version || version == publishedHeadsVersion
+}
+
+// Similarity keeps different foreground preprocessors in separate retrieval spaces.
+// The two historical bounding-box formats share the same visual dimensions.
 func Similarity(a, b inference.EmbeddingResult) (float64, error) {
+	if a.ModelVersion != b.ModelVersion && (IsSilhouette(a.ModelVersion) || IsSilhouette(b.ModelVersion)) {
+		return 0, fmt.Errorf("reid: incompatible silhouettes or bounding-box descriptors; re-encode both inputs with the same masks")
+	}
 	na, err := squaredVisualNorm(a)
 	if err != nil {
 		return 0, err

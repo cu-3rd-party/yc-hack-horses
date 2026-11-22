@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -71,7 +70,7 @@ type Config struct {
 		Engine        string `yaml:"engine"`
 		ComparisonURL string `yaml:"comparison_url"`
 		ModelBaseURL  string `yaml:"model_base_url"`
-		// ModelPath — путь к ONNX-весам YOLO (только engine=yolo; вне git).
+		// ModelPath — путь к ONNX-весам YOLO. Пустой путь включает выбор из DATA_DIR/models.
 		ModelPath string `yaml:"model_path"`
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
 		RuntimeLib   string `yaml:"runtime_lib"`
@@ -270,11 +269,7 @@ func (c *Config) Validate() error {
 	switch c.Inference.Engine {
 	case "unavailable", "reference":
 	case "yolo":
-		// ModelPath без env — дефолт DataDir/models/yolov8n.onnx (веса
-		// не запечены в образ, качаются менеджером на постоянный том).
-		if c.Inference.ModelPath == "" {
-			c.Inference.ModelPath = filepath.Join(c.Node.DataDir, "models", "yolov8n.onnx")
-		}
+		// An empty model path is resolved by app.New using the installed detector files.
 		if c.Inference.RuntimeLib == "" {
 			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
 		}

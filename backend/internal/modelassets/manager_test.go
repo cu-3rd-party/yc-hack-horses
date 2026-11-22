@@ -17,6 +17,70 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAutoDownloadWaitsForInitialVerification(t *testing.T) {
+	data := []byte("verified model")
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	path := filepath.Join(t.TempDir(), "model.onnx")
+	m := &Manager{
+		ctx: ctx, stop: cancel, checked: make(chan struct{}), client: server.Client(),
+		files: []*artifact{{
+			Status:    Status{ID: "yolo", State: "checking", HasSource: true},
+			modelFile: modelFile{path, fmt.Sprintf("%x", sha256.Sum256(data))}, source: server.URL,
+		}},
+	}
+	t.Cleanup(m.Close)
+	m.AutoDownload()
+	m.AutoDownload()
+	require.Zero(t, requests.Load())
+	m.mu.Lock()
+	m.files[0].State = "missing"
+	m.mu.Unlock()
+	close(m.checked)
+	require.Eventually(t, func() bool { return m.Status()[0].State == "ready" }, 3*time.Second, time.Millisecond)
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+	require.EqualValues(t, 1, requests.Load())
+}
+
+func TestAutoDownloadStopsWhileVerificationIsPending(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &Manager{ctx: ctx, stop: cancel, checked: make(chan struct{})}
+	m.AutoDownload()
+	done := make(chan struct{})
+	go func() { m.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close waited for model verification after cancellation")
+	}
+	m.AutoDownload()
+}
+
+func TestDetectorSelectionForNewAndExistingNodes(t *testing.T) {
+	dir := t.TempDir()
+	preferred := filepath.Join(dir, "yolo26x.onnx")
+	legacy := filepath.Join(dir, "yolov8n.onnx")
+	require.Equal(t, preferred, DefaultDetectorPath(dir))
+	m := New(DefaultDetectorPath(dir), dir, "", nil)
+	t.Cleanup(m.Close)
+	file := m.find("yolo")
+	require.Equal(t, "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x.onnx", file.source)
+	require.Equal(t, detector26xSHA, file.sha)
+	require.EqualValues(t, 223287479, file.Size)
+
+	require.NoError(t, os.WriteFile(legacy, []byte("installed legacy model"), 0o600))
+	require.Equal(t, legacy, DefaultDetectorPath(dir))
+	require.NoError(t, os.WriteFile(preferred, []byte("installed preferred model"), 0o600))
+	require.Equal(t, preferred, DefaultDetectorPath(dir))
+}
+
 func TestSeparateDownloadsVerifyCancelAndRetry(t *testing.T) {
 	contents := []byte("test model")
 	var attempts atomic.Int32
@@ -159,7 +223,7 @@ func TestPartHeadsDownloadFromKaggleAndSurviveRestart(t *testing.T) {
 	require.True(t, MatchesSHA(HeadsSHA, legacyHeadsSHA))
 	require.False(t, MatchesSHA(DinoSHA, HeadsSHA))
 	payload[0] ^= 1
-	require.NoError(t, os.WriteFile(path, payload, 0600))
+	require.NoError(t, os.WriteFile(path, payload, 0o600))
 	require.Equal(t, "error", open().Status()[3].State)
 }
 

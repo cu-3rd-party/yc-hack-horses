@@ -25,6 +25,7 @@ import (
 type Segmenter struct {
 	parts   *ort.DynamicAdvancedSession
 	weights []float32
+	version string
 }
 type Encoder struct {
 	visual *ort.DynamicAdvancedSession
@@ -52,6 +53,7 @@ func verifiedFile(dir, name, sha string) (string, error) {
 	}
 	return path, nil
 }
+
 func session(path, input, output string) (*ort.DynamicAdvancedSession, error) {
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
@@ -103,7 +105,11 @@ func OpenSegmenter(dir string) (*Segmenter, error) {
 	if len(raw) != 4*headWidth*4 {
 		return nil, fmt.Errorf("reid: invalid part head dimensions")
 	}
-	e := &Segmenter{weights: make([]float32, 4*headWidth)}
+	version := Version
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) == modelassets.HeadsSHA {
+		version = publishedHeadsVersion
+	}
+	e := &Segmenter{weights: make([]float32, 4*headWidth), version: version}
 	for i := range e.weights {
 		e.weights[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
 	}
@@ -156,53 +162,71 @@ func cropForParts(src image.Image, box image.Rectangle) (*image.RGBA, error) {
 	draw.Draw(img, roi, src, roi.Min, draw.Src)
 	return img, nil
 }
-func (e *Segmenter) pixels(ctx context.Context, img *image.RGBA, box image.Rectangle) ([]pixel, error) {
-	return segmentedPixels(ctx, img, box, func(ctx context.Context, r image.Rectangle) (partMaps, error) {
+
+func (e *Segmenter) Mask(ctx context.Context, src image.Image, box image.Rectangle) ([]byte, error) {
+	region, err := e.Region(ctx, src, box, true)
+	if err != nil {
+		return nil, err
+	}
+	return maskPNG(region.samples, box)
+}
+
+// Region holds the same per-instance segmentation for the descriptor and annotations.
+type Region struct {
+	img     *image.RGBA
+	box     image.Rectangle
+	samples []pixel
+	version string
+}
+
+func (e *Segmenter) Region(ctx context.Context, src image.Image, box image.Rectangle, detail bool) (*Region, error) {
+	img, err := cropForParts(src, box)
+	if err != nil {
+		return nil, err
+	}
+	samples, err := segmentedPixels(ctx, img, box, detail, func(ctx context.Context, r image.Rectangle) (partMaps, error) {
 		v, err := run(ctx, e.parts, img, r, 224, ort.NewShape(1, 257, tokenDim), true)
 		if err != nil {
 			return partMaps{}, err
 		}
 		return decodeParts(v, e.weights, r), nil
 	})
-}
-func (e *Segmenter) Mask(ctx context.Context, src image.Image, box image.Rectangle) ([]byte, error) {
-	img, err := cropForParts(src, box)
 	if err != nil {
 		return nil, err
 	}
-	samples, err := e.pixels(ctx, img, box)
-	if err != nil {
-		return nil, err
-	}
-	return maskPNG(samples, box)
+	return &Region{img: img, box: box, samples: samples, version: e.version}, nil
 }
 
-// Measure computes operator-visible measurements; its outputs do not enter the descriptor.
-func (e *Segmenter) Measure(ctx context.Context, src image.Image, box image.Rectangle, withMasks bool) (TraitEvidence, []byte, error) {
-	img, err := cropForParts(src, box)
-	if err != nil {
-		return TraitEvidence{}, nil, err
-	}
-	samples, err := e.pixels(ctx, img, box)
-	if err != nil {
-		return TraitEvidence{}, nil, err
-	}
-	result, err := evidence(samples, box, withMasks)
+func (r *Region) Measure(withMasks bool) (TraitEvidence, []byte, error) {
+	result, err := evidence(r.samples, r.box, withMasks)
 	if err != nil || !withMasks {
 		return result, nil, err
 	}
-	mask, err := maskPNG(samples, box)
+	mask, err := maskPNG(r.samples, r.box)
 	return result, mask, err
 }
 
+// EmbedRegion reproduces foreground-only descriptors from the silhouette experiment.
+func (e *Encoder) EmbedRegion(ctx context.Context, region *Region) (inference.EmbeddingResult, error) {
+	if !maskBackground(region.img, region.box, region.samples) {
+		return inference.EmbeddingResult{}, inference.ErrNoAnimalDetected
+	}
+	return e.encode(ctx, region.img, region.box, region.version)
+}
+
+// Embed encodes the unmodified RGB crop used in the seasonal retrieval benchmark.
 func (e *Encoder) Embed(ctx context.Context, src image.Image, box image.Rectangle) (inference.EmbeddingResult, error) {
 	img, err := cropForParts(src, box)
 	if err != nil {
 		return inference.EmbeddingResult{}, err
 	}
+	return e.encode(ctx, img, box, BoxVersion)
+}
+
+func (e *Encoder) encode(ctx context.Context, img *image.RGBA, box image.Rectangle, version string) (inference.EmbeddingResult, error) {
 	visual, err := run(ctx, e.visual, img, box, 384, ort.NewShape(1, Dimension), false)
 	if err != nil {
 		return inference.EmbeddingResult{}, err
 	}
-	return visualEmbedding(visual)
+	return visualEmbedding(visual, version)
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
@@ -20,14 +21,17 @@ import (
 	"github.com/google/uuid"
 )
 
-var errDecisionConflict = errors.New("the detection already has a different decision or was skipped")
-var errCandidate = errors.New("horse was not a candidate for this detection")
+var (
+	errDecisionConflict = errors.New("the detection already has a different decision or was skipped")
+	errCandidate        = errors.New("horse was not a candidate for this detection")
+)
 
 func createComparison(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		form := struct {
-			SHA  string `json:"blob_sha256"`
-			TopK int    `json:"top_k"`
+			SHA         string `json:"blob_sha256"`
+			CaptureDate string `json:"capture_date"`
+			TopK        int    `json:"top_k"`
 		}{TopK: 5}
 		if err := json.NewDecoder(r.Body).Decode(&form); err != nil {
 			writeError(w, 400, "invalid JSON body")
@@ -36,6 +40,12 @@ func createComparison(d Deps) http.HandlerFunc {
 		if _, err := hex.DecodeString(form.SHA); len(form.SHA) != 64 || err != nil || form.TopK < 1 {
 			writeError(w, 422, "valid blob_sha256 and positive top_k required")
 			return
+		}
+		if form.CaptureDate != "" {
+			if _, err := time.Parse(time.DateOnly, form.CaptureDate); err != nil {
+				writeError(w, 422, "capture_date must be YYYY-MM-DD")
+				return
+			}
 		}
 		ctx := r.Context()
 		b, err := d.Store.GetBlobMeta(ctx, form.SHA)
@@ -85,7 +95,32 @@ func createComparison(d Deps) http.HandlerFunc {
 				serverError(w, err)
 				return
 			}
+			capture := comparison.CaptureTime(image)
+			if form.CaptureDate != "" && !strings.HasPrefix(capture, form.CaptureDate) {
+				capture = form.CaptureDate
+			}
+			legacy := map[string]string{}
+			for i, r := range refs {
+				if !r.NeedsCapture {
+					continue
+				}
+				value, seen := legacy[r.SHA]
+				if !seen {
+					original, err := d.Blobs.Get(ctx, r.SHA)
+					if err != nil {
+						continue
+					}
+					value = comparison.CaptureTime(original)
+					if err := d.Store.SetLegacyCapture(ctx, r.SHA, value); err != nil {
+						serverError(w, err)
+						return
+					}
+					legacy[r.SHA] = value
+				}
+				refs[i].CaptureTime = value
+			}
 			for _, p := range found {
+				p.Descriptor.CaptureTime = capture
 				det := comparison.Detection{ID: uuid.Must(uuid.NewV7()).String(), Confidence: p.Confidence, Annotation: p.Annotation, Candidates: comparison.Rank(p.Descriptor, refs, form.TopK)}
 				result.Detections = append(result.Detections, det)
 				review.Items = append(review.Items, comparison.Item{Detection: det, Descriptor: p.Descriptor})

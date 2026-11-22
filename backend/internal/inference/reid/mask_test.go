@@ -3,6 +3,7 @@ package reid
 import (
 	"bytes"
 	"image"
+	"image/color"
 	"image/png"
 	"testing"
 
@@ -30,4 +31,33 @@ func TestMaskPNGEncodesOverlappingPartsInCropCoordinates(t *testing.T) {
 	raw, err = maskPNG(make([]pixel, len(samples)), box)
 	require.NoError(t, err)
 	require.Empty(t, raw)
+}
+
+func TestMaskBackgroundKeepsOnlyBodyBeforeResizing(t *testing.T) {
+	box := image.Rect(11, 7, 268, 13)
+	makeCrop := func(bg uint8) *image.RGBA {
+		img := image.NewRGBA(box.Inset(-2))
+		for y := box.Min.Y; y < box.Max.Y; y++ {
+			for x := box.Min.X; x < box.Max.X; x++ {
+				c := color.RGBA{bg, bg, bg, 255}
+				if x < box.Min.X+128 {
+					c = color.RGBA{201, 159, 82, 255}
+				}
+				img.SetRGBA(x, y, c)
+			}
+		}
+		return img
+	}
+	samples := make([]pixel, 128*box.Dy())
+	for i := range samples {
+		samples[i].body = i%128 < 64
+		samples[i].head = true // Only the body channel can keep RGB pixels.
+	}
+	a, b := makeCrop(1), makeCrop(255)
+	require.True(t, maskBackground(a, box, samples))
+	require.True(t, maskBackground(b, box, samples))
+	require.Equal(t, color.RGBA{201, 159, 82, 255}, a.RGBAAt(box.Min.X+127, box.Min.Y))
+	require.Equal(t, color.RGBA{127, 127, 127, 255}, a.RGBAAt(box.Min.X+128, box.Min.Y))
+	require.Equal(t, tensorPixels(a, box, 384, false), tensorPixels(b, box, 384, false))
+	require.False(t, maskBackground(a, box, make([]pixel, len(samples))))
 }

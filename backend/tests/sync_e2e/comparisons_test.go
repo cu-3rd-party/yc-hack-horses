@@ -337,5 +337,7 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	replica := compare(b, 2, 201)
 	require.Equal(t, horses[0], replica.Detections[0].Candidates[0].HorseID)
 	require.Equal(t, query.Detections[0].ID, replica.Detections[0].Candidates[0].BestPhotoID)
+	// Both confirmations refer to the same original. The latest annotation represents it once.
 	require.InDelta(t, 1., replica.Detections[0].Candidates[0].Similarity, 1e-12)
+	require.Equal(t, 1, replica.Detections[0].Candidates[0].ReferenceCount)
 }

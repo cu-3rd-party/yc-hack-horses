@@ -22,6 +22,7 @@ const (
 	partHeadsURL   = "https://www.kaggle.com/api/v1/datasets/download/sorrowdev/loshid-horse-part-heads/part-heads.f32?datasetVersionNumber=1"
 	HeadsSHA       = "17766f17e8a6b8fb6741b47fbc67f25c90e097043609b2891e57b3ad82d6a92d"
 	DetectorSHA    = "b2bc52f40e8e1c532427d5bde3575a5d5b571b739fab2c6df443733ed1589cbd"
+	detector26xSHA = "88568299de91d4967f239a062c9f1619f695ebd05de73cd66b8f589591aaeb0a"
 	DescriptorSHA  = "de9d5ed23423c7f6a09e0cc033c9dc645a8b672264ad22d8d776fba470eba50f"
 	DinoSHA        = "83141175ec78b4ff9a2bb58a4c7c264ba0054d1c2e122e5a8114b79a8d4179ea"
 	legacyHeadsSHA = "a1f535819545891bd7ee01391575a9c02cdcc599da8dbf19425a980957254408"
@@ -57,13 +58,15 @@ type Manager struct {
 	ctx       context.Context
 	stop      context.CancelFunc
 	jobs      sync.WaitGroup
+	checked   chan struct{}
+	autoOnce  sync.Once
 	installed func()
 	client    *http.Client
 }
 
 func New(detector, dir, baseURL string, installed func()) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{
+	m := &Manager{ctx: ctx, stop: cancel, checked: make(chan struct{}), installed: installed, client: &http.Client{
 		Timeout: 2 * time.Hour,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" || len(via) > 8 {
@@ -72,11 +75,15 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 			return nil
 		},
 	}}
+	detectorName, detectorHash, detectorSize := legacyDetectorFile, DetectorSHA, int64(12851049)
+	if filepath.Base(detector) == defaultDetectorFile {
+		detectorName, detectorHash, detectorSize = defaultDetectorFile, detector26xSHA, 223287479
+	}
 	for _, spec := range []struct {
 		id, name, sha, origin string
 		size                  int64
 	}{
-		{"yolo", "yolov8n.onnx", DetectorSHA, "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8n.onnx", 12851049},
+		{"yolo", detectorName, detectorHash, "https://github.com/ultralytics/assets/releases/download/v8.4.0/" + detectorName, detectorSize},
 		{"megadescriptor", DescriptorCheckpoint, checkpointSHA, checkpointURL, checkpointSize},
 		{"dinov2", "dinov2-small.onnx", DinoSHA, "https://huggingface.co/Xenova/dinov2-small/resolve/c2bb04a51fab207c420665f1946016107bffc701/onnx/model.onnx", 88459888},
 		{"part-heads", "part-heads.f32", HeadsSHA, partHeadsURL, 6192},
@@ -104,6 +111,7 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 	m.jobs.Add(1)
 	go func() {
 		defer m.jobs.Done()
+		defer close(m.checked)
 		for _, a := range m.files {
 			m.check(a)
 		}
@@ -115,18 +123,28 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 // источников. Вызывается приложением после New (в тестах — не вызывается,
 // чтобы тесты менеджера не ходили в сеть за весами).
 func (m *Manager) AutoDownload() {
-	m.mu.Lock()
-	var ids []string
-	for _, a := range m.files {
-		if a.HasSource && a.State == "missing" {
-			ids = append(ids, a.ID)
+	m.autoOnce.Do(func() {
+		m.mu.Lock()
+		if m.ctx.Err() != nil {
+			m.mu.Unlock()
+			return
 		}
-	}
-	m.mu.Unlock()
-	// Start берёт mu сам — держим лок захватываем только на чтение состояний.
-	for _, id := range ids {
-		_ = m.Start(id, "")
-	}
+		m.jobs.Add(1)
+		m.mu.Unlock()
+		go func() {
+			defer m.jobs.Done()
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-m.checked:
+			}
+			for _, a := range m.Status() {
+				if a.HasSource && a.State == "missing" {
+					_ = m.Start(a.ID, "")
+				}
+			}
+		}()
+	})
 }
 
 func (m *Manager) check(a *artifact) {

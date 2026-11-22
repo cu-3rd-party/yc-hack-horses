@@ -3,6 +3,7 @@ module github.com/cu3rd/yc-hack-horses/backend
 go 1.26.0
 
 require (
+	github.com/bep/imagemeta v1.1.2
 	github.com/coder/websocket v1.8.15
 	github.com/disintegration/imaging v1.6.2
 	github.com/go-chi/chi/v5 v5.5.0

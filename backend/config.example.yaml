@@ -50,6 +50,6 @@ inference:
   engine: "unavailable"     # unavailable | reference | yolo (ADR-0012)
   # engine: yolo — детекция лошади YOLO ONNX + кропы; веса НЕ в git:
   # bash infra/scripts/download-yolo-model.sh
-  # model_path: "infra/models/yolov8n.onnx"
+  # model_path: "infra/models/yolo26x.onnx"  # по умолчанию из DATA_DIR/models
   # runtime_lib: "infra/models/libonnxruntime.so.1.31.1"
   # reid_model_dir: "infra/models/reid-v1"  # поиск по MegaDescriptor-L-384, измерения по маскам для просмотра

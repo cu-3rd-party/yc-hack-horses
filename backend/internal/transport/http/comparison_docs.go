@@ -14,10 +14,11 @@ func addComparisonSchemas(s map[string]schemaNode) {
 	s["ComparisonTrait"] = obj().prop("key", label).prop("value", label).prop("polygon", traitPolygon).required("key", "value", "polygon")
 	s["HorseAnnotation"] = obj().prop("horse_polygon", polygon).prop("traits", schemaArray(schemaRef("ComparisonTrait"))).required("horse_polygon", "traits")
 	s["HorseCandidate"] = obj().prop("horse_id", id).prop("name", label).prop("best_photo_id", id).
+		prop("reference_count", schemaNode{"type": "integer", "minimum": 1}).prop("season_fallback", schemaNode{"type": "boolean"}).
 		prop("cosine_similarity", schemaNode{"type": "number", "minimum": -1, "maximum": 1}).required("horse_id", "name", "best_photo_id", "cosine_similarity")
 	s["HorseDetection"] = obj().prop("detection_id", id).prop("detection_confidence", schemaNode{"type": "number", "minimum": 0, "maximum": 1}).
 		prop("annotation", schemaRef("HorseAnnotation")).prop("candidates", schemaArray(schemaRef("HorseCandidate"))).required("detection_id", "detection_confidence", "annotation", "candidates")
-	s["ComparisonRequest"] = obj().prop("blob_sha256", sha).prop("top_k", schemaNode{"type": "integer", "minimum": 1, "default": 5}).required("blob_sha256")
+	s["ComparisonRequest"] = obj().prop("blob_sha256", sha).prop("capture_date", schemaNode{"type": "string", "format": "date"}).prop("top_k", schemaNode{"type": "integer", "minimum": 1, "default": 5}).required("blob_sha256")
 	s["ComparisonResult"] = obj().prop("comparison_id", id).prop("blob_sha256", sha).prop("detections", schemaArray(schemaRef("HorseDetection"))).required("comparison_id", "blob_sha256", "detections")
 	decision := func(action, field string, value schemaNode) schemaNode {
 		return obj().prop("action", schemaNode{"type": "string", "enum": []string{action}}).prop(field, value).prop("observation_name", label).prop("comment", strSchema("Комментарий к наблюдению, опционально")).required("action", field, "observation_name")

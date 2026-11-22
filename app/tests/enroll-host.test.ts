@@ -115,7 +115,8 @@ describe('buildNodeEnv', () => {
     expect(env.GRPC_LISTEN_ADDR).toBe('127.0.0.1:0');
     expect(env.SYNC_CENTRAL_URL).toBe('https://yc-hack-horses.cu3rd.ru');
     expect(env.INFER_ENGINE).toBe('yolo');
-    expect(env.INFER_MODEL_PATH).toBe('/u/journal/models/yolov8n.onnx');
+    expect(env.DATA_DIR).toBe('/u/journal');
+    expect(env).not.toHaveProperty('INFER_MODEL_PATH');
     expect(env.INFER_REID_MODEL_DIR).toBe('/u/journal/models');
     expect(env.INFER_RUNTIME_LIB).toBe('/res/node/libonnxruntime.so');
     expect(env.MIGRATIONS_DIR).toBe('/res/node/migrations');

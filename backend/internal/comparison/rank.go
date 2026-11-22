@@ -4,6 +4,8 @@ import (
 	"math"
 	"sort"
 	"time"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 )
 
 // Reference — подтверждённое фото-эталон для ранжирования.
@@ -14,8 +16,9 @@ import (
 // будущих источников. Иначе помеченный эталон мог бы победить по косинусу и
 // попасть в BestPhotoID, а клиент получил бы ссылку на несуществующий блоб.
 type Reference struct {
-	HorseID, Name, PhotoID string
-	InvalidatedAt          *time.Time
+	HorseID, Name, PhotoID, SHA string
+	NeedsCapture                bool
+	InvalidatedAt               *time.Time
 	Descriptor
 }
 
@@ -48,38 +51,127 @@ func unit(v []float64) []float64 {
 	return u
 }
 
+// Date only and local ISO timestamps share the same YYYY-MM-DD prefix.
+func calendarSeason(capture string) int {
+	if len(capture) < 10 {
+		return -1
+	}
+	d, err := time.Parse(time.DateOnly, capture[:10])
+	if err != nil {
+		return -1
+	}
+	return int(d.Month()) % 12 / 3
+}
+
+func dotUnit(a, b []float64) float64 {
+	var sum float64
+	for i, x := range a {
+		sum += x * b[i]
+	}
+	return max(-1., min(1., sum))
+}
+
+func referenceKey(r Reference) string {
+	if r.SHA != "" {
+		return r.SHA
+	}
+	return r.PhotoID
+}
+
+// A repeated confirmation of the same photo contributes only one embedding.
+func recentReferences(rows []Reference, season int) ([]Reference, bool) {
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		if a.CaptureTime != b.CaptureTime {
+			return a.CaptureTime > b.CaptureTime
+		}
+		if referenceKey(a) != referenceKey(b) {
+			return referenceKey(a) < referenceKey(b)
+		}
+		return a.PhotoID > b.PhotoID
+	})
+	var bins [5][]Reference // last bin is reserved for legacy undated photos
+	seen := map[string]bool{}
+	for _, r := range rows {
+		k := referenceKey(r)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		s := calendarSeason(r.CaptureTime)
+		if s < 0 {
+			s = 4
+		}
+		if len(bins[s]) < 5 {
+			bins[s] = append(bins[s], r)
+		}
+	}
+	if season >= 0 && len(bins[season]) > 0 {
+		return bins[season], false
+	}
+	var fallback []Reference
+	for _, bin := range bins[:4] {
+		fallback = append(fallback, bin...)
+	}
+	if len(fallback) == 0 {
+		fallback = bins[4]
+	}
+	return fallback, true
+}
+
 func Rank(query Descriptor, references []Reference, k int) []Candidate {
 	q := unit(query.Vector)
-	if k < 1 || len(q) == 0 {
+	useAdapter := query.Version == reid.BoxVersion
+	if useAdapter {
+		q = adaptBox(q)
+	}
+	if k < 1 || q == nil {
 		return []Candidate{}
 	}
-	best := make(map[string]Candidate)
-	for _, ref := range references {
-		// Удалённое фото не участвует в поиске: его вектор не даёт ни очков,
-		// ни BestPhotoID. Для той же лошади остаётся живое соседнее фото.
-		if !ref.searchable() {
+	groups := map[string][]Reference{}
+	for _, r := range references {
+		if !r.searchable() || r.Version != query.Version || len(r.Vector) != len(q) {
 			continue
 		}
-		if query.Version != ref.Version || len(q) != len(ref.Vector) {
-			continue
-		}
-		v := unit(ref.Vector)
-		if v == nil {
-			continue
-		}
-		var score float64
-		for i := range q {
-			score += q[i] * v[i]
-		}
-		score = max(-1.0, min(score, 1.0))
-		old, ok := best[ref.HorseID]
-		if !ok || score > old.Similarity || (score == old.Similarity && ref.PhotoID < old.BestPhotoID) {
-			best[ref.HorseID] = Candidate{HorseID: ref.HorseID, Name: ref.Name, BestPhotoID: ref.PhotoID, Similarity: score}
+		r.Vector = unit(r.Vector)
+		if r.Vector != nil {
+			groups[r.HorseID] = append(groups[r.HorseID], r)
 		}
 	}
-	out := make([]Candidate, 0, len(best))
-	for _, c := range best {
-		out = append(out, c)
+	requested := calendarSeason(query.CaptureTime)
+	out := make([]Candidate, 0, len(groups))
+	for id, rows := range groups {
+		refs, fallback := recentReferences(rows, requested)
+		sum := make([]float64, len(q))
+		candidate := Candidate{HorseID: id, Name: refs[0].Name, ReferenceCount: len(refs), SeasonFallback: fallback}
+		for j, r := range refs {
+			if useAdapter {
+				r.Vector = adaptBox(r.Vector)
+				refs[j].Vector = r.Vector
+			}
+			for i, x := range r.Vector {
+				sum[i] += x
+			}
+		}
+		centroid := unit(sum)
+		if centroid == nil {
+			continue
+		}
+		candidate.Similarity = dotUnit(q, centroid)
+		anchor := q
+		if useAdapter {
+			// The example photograph represents this horse's seasonal centroid.
+			anchor = centroid
+		}
+		best := -2.
+		for _, r := range refs {
+			score := dotUnit(anchor, r.Vector)
+			if score > best || (!useAdapter && score == best && r.PhotoID < candidate.BestPhotoID) {
+				best = score
+				candidate.BestPhotoID = r.PhotoID
+			}
+		}
+		out = append(out, candidate)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Similarity == out[j].Similarity {

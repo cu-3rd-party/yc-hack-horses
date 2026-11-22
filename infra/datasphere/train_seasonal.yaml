@@ -1,0 +1,15 @@
+name: przewalski-five-recent-per-season
+desc: Chronological validation and final refit of MegaDescriptor residual adapters on dated horse photos.
+cmd: bash train_seasonal.sh ${FEATURES} ${RESULT}
+inputs:
+  - features.tgz: FEATURES
+  - duplicates.json
+  - exclusions.json
+  - identity-evidence.json
+  - train_seasonal.sh
+  - train_seasonal.py
+  - seasonal_retrieval.py
+outputs:
+  - seasonal.tgz: RESULT
+cloud-instance-types:
+  - gt4.1
