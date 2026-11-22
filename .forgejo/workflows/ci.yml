@@ -133,7 +133,7 @@ jobs:
         run: |
           set -eu
           docker build --cpuset-cpus 0-3 --memory 4g -f backend/Dockerfile -t "$IMAGE" .
-          journal=$(docker run -d -e API_DOCS_ENABLED=true "$IMAGE")
+          journal=$(docker run -d -e API_DOCS_ENABLED=true -e GRPC_LISTEN_ADDR=127.0.0.1:9443 "$IMAGE")
           trap 'docker rm -fv "$journal" >/dev/null' EXIT
           docker run --rm -i --network "container:$journal" node:22-bookworm-slim node --input-type=module - < .ci/smoke-web.mjs
       - name: Publish web image
