@@ -49,6 +49,12 @@ func unit(v []float64) []float64 {
 }
 
 func Rank(query Descriptor, references []Reference, k int) []Candidate {
+	// Диспетчер версий: horseid-дескриптор (голова+тело) идёт в отдельную
+	// реализацию, остальные версии (megadescriptor, seasonal-адаптер) —
+	// прежним путём, без изменений.
+	if query.Version == horseidVersion {
+		return rankHorseID(query, references, k)
+	}
 	q := unit(query.Vector)
 	if k < 1 || len(q) == 0 {
 		return []Candidate{}
