@@ -224,9 +224,19 @@ func createObservation(d Deps) http.HandlerFunc {
 			return
 		}
 		// Ответ — из проекции: наблюдение могло быть помечено неактуальным сразу.
-		if stored, err := d.Store.GetObservation(r.Context(), o.ID); err == nil {
-			o = stored
+		// Событие к этому моменту уже закоммичено, поэтому молча отдавать stale-
+		// объект нельзя: ErrNotFound — 404, прочие ошибки — 500 с логом.
+		//
+		// Внимание: 500 здесь возможен уже после успешного коммита (событие
+		// записано, а чтение проекции упало). Клиентский ретрай в этом случае
+		// создаст второе наблюдение — смиряемся с этим ради честного кода
+		// ответа вместо выдачи stale-объекта.
+		stored, err := d.Store.GetObservation(r.Context(), o.ID)
+		if err != nil {
+			notFoundOrServerError(w, err, "observation")
+			return
 		}
+		o = stored
 		w.Header().Set("Location", "/api/v1/observations/"+o.ID)
 		writeJSON(w, http.StatusCreated, o)
 	}
@@ -350,9 +360,35 @@ func getBlob(d Deps) http.HandlerFunc {
 	}
 }
 
+// errBlobAlreadyDeleted — блоб удалён параллельным запросом между
+// предварительной проверкой и проекцией. Транзакция откатывается, поэтому
+// дублирующее событие blob.deleted не пишется.
+var errBlobAlreadyDeleted = errors.New("blob already deleted")
+
+// markBlobDeletedTx — тело транзакции удаления: гард, инвалидация наблюдений,
+// событие blob.deleted. Вынесено отдельной функцией, чтобы тест мог вызвать
+// её при уже удалённой строке и получить errBlobAlreadyDeleted (n == 0).
+func markBlobDeletedTx(ctx context.Context, tx *sqlstore.Store, nodeID, sha string, now time.Time, reason string, payload domain.BlobDeleted) (domain.Event, error) {
+	n, err := tx.MarkBlobDeleted(ctx, sha, now, reason)
+	if err != nil {
+		return domain.Event{}, err
+	}
+	if n == 0 {
+		return domain.Event{}, errBlobAlreadyDeleted
+	}
+	if _, err := tx.InvalidateObservationsByBlob(ctx, sha, now, reason); err != nil {
+		return domain.Event{}, err
+	}
+	return appendLocalEvent(ctx, tx, nodeID, domain.EventBlobDeleted, sha, mustJSON(payload))
+}
+
 // deleteBlob мягко удаляет блоб событием blob.deleted: строка помечается в
-// проекции, файл удаляет она же — и только если на блоб не ссылается ни одно
-// наблюдение. Повторный DELETE уже удалённого блоба — 404.
+// проекции, файл удаляет она же и только если на блоб не ссылается ни одно
+// наблюдение.
+//
+// Повторный DELETE уже удалённого блоба — 404 (событие не дублируется). Гонка
+// параллельных DELETE разрешается гардом MarkBlobDeleted (см. его контракт):
+// строку меняет ровно один запрос, остальные откатываются и получают 404.
 func deleteBlob(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sha := chi.URLParam(r, "sha256")
@@ -360,6 +396,7 @@ func deleteBlob(d Deps) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid sha256")
 			return
 		}
+		// Несуществующий или уже удалённый блоб — 404 ещё до записи события.
 		if _, err := d.Store.GetBlobMeta(r.Context(), sha); err != nil {
 			notFoundOrServerError(w, err, "blob")
 			return
@@ -367,15 +404,32 @@ func deleteBlob(d Deps) http.HandlerFunc {
 		reason := strings.TrimSpace(r.URL.Query().Get("reason"))
 		now := d.Clock().UTC()
 		payload := domain.BlobDeleted{SHA256: sha, DeletedAt: now, Reason: reason}
-		err := appendWithProjection(d, r.Context(), domain.EventBlobDeleted, sha, mustJSON(payload),
-			func(tx *sqlstore.Store) error {
-				_, err := tx.ProjectBlobDeleted(r.Context(), sha, now, reason)
-				return err
-			})
+		// Порядок принципиален: гард MarkBlobDeleted идёт ДО appendLocalEvent.
+		// (а) Так блокировки берутся в том же порядке, что и в uploadBlob
+		// (UpsertBlob блокирует строку blobs, затем appendLocalEvent берёт
+		// advisory-lock в LastSequence). Если писать событие первым, порядок
+		// становится обратным, и на postgres конкурентные ре-аплоад и удаление
+		// одного sha могут дать дедлок 40P01.
+		// (б) MarkBlobDeleted — это UPDATE ... WHERE deleted_at = 0: при двух
+		// параллельных DELETE ровно один запрос видит 1 затронутую строку,
+		// проигравший — 0 и уходит в errBlobAlreadyDeleted (404), не сжигая
+		// sequence и не записывая дублирующее событие blob.deleted.
+		var published domain.Event
+		err := d.Store.RunInTx(r.Context(), func(tx *sqlstore.Store) error {
+			var err error
+			published, err = markBlobDeletedTx(r.Context(), tx, d.NodeID, sha, now, reason, payload)
+			return err
+		})
 		if err != nil {
+			if errors.Is(err, errBlobAlreadyDeleted) {
+				writeError(w, http.StatusNotFound, "blob not found")
+				return
+			}
 			serverError(w, err)
 			return
 		}
+		// Публикация в WS — только после успешного коммита.
+		publishEvent(d, published)
 		// Файл — после коммита события и проекции (см. storage.PruneBlobs).
 		storage.PruneBlobs(r.Context(), d.Store, d.Blobs, []string{sha}, slog.Default())
 		w.WriteHeader(http.StatusNoContent)
