@@ -199,6 +199,50 @@ func TestListActiveReferencedBlobHashesInvalidJSON(t *testing.T) {
 	}
 }
 
+// TestListActiveReferencedBlobHashesPassport — PDF-паспорт лошади не связан с
+// наблюдением: его sha256 лежит в metadata.passport_sha256. Без отдельного
+// учёта паспорт выпадал бы из потребностей неполного синка и не доезжал до
+// пиров. Мягко удалённый паспортный блоб в потребности не входит.
+func TestListActiveReferencedBlobHashesPassport(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, filepath.Join(t.TempDir(), "test.db"))
+
+	passport := strings.Repeat("a", 64)
+	deadPassport := strings.Repeat("b", 64)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for _, b := range []domain.Blob{
+		{ID: "01990000-0000-7000-8000-0000000000c1", SHA256: passport, MimeType: "application/pdf", Size: 1},
+		{ID: "01990000-0000-7000-8000-0000000000c2", SHA256: deadPassport, MimeType: "application/pdf", Size: 1},
+	} {
+		if _, err := s.UpsertBlobAt(ctx, b, now); err != nil {
+			t.Fatalf("upsert blob %s: %v", b.SHA256, err)
+		}
+	}
+	if err := s.CreateHorse(ctx, domain.Horse{
+		ID: "horse-1", CreatedAt: now, IdentityStatus: "confirmed",
+		Metadata: map[string]string{domain.MetaPassportSHA256: strings.ToUpper(passport)},
+	}); err != nil {
+		t.Fatalf("create horse: %v", err)
+	}
+	if err := s.CreateHorse(ctx, domain.Horse{
+		ID: "horse-2", CreatedAt: now, IdentityStatus: "confirmed",
+		Metadata: map[string]string{domain.MetaPassportSHA256: deadPassport},
+	}); err != nil {
+		t.Fatalf("create horse: %v", err)
+	}
+	if _, err := s.MarkBlobDeleted(ctx, deadPassport, now.Add(time.Second), "deleted"); err != nil {
+		t.Fatalf("mark blob deleted: %v", err)
+	}
+
+	got, err := s.ListActiveReferencedBlobHashes(ctx)
+	if err != nil {
+		t.Fatalf("list active referenced blob hashes: %v", err)
+	}
+	if len(got) != 1 || got[0] != passport {
+		t.Fatalf("got %v, want [%q]", got, passport)
+	}
+}
+
 func TestBlobStoreContract(t *testing.T) {
 	// один каталог на весь набор: RestartRecovery переоткрывает его же
 	dir := t.TempDir()

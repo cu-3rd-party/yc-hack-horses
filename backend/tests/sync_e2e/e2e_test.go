@@ -30,6 +30,11 @@ type nodeHTTPInfo struct {
 	NodeID     string             `json:"node_id"`
 	EventCount int                `json:"event_count"`
 	Sync       []apppkg.PeerStats `json:"sync"`
+	Blobs      struct {
+		Referenced int `json:"referenced"`
+		Present    int `json:"present"`
+		Missing    int `json:"missing"`
+	} `json:"blobs"`
 }
 
 // e2eNode — запущенная нода в тесте.
@@ -202,6 +207,13 @@ func (n *e2eNode) listObservations(t *testing.T) []domain.Observation {
 	resp, err := http.Get(n.httpBase + "/api/v1/observations")
 	require.NoError(t, err)
 	return decode[[]domain.Observation](t, resp)
+}
+
+func (n *e2eNode) listBlobs(t *testing.T) []domain.Blob {
+	t.Helper()
+	resp, err := http.Get(n.httpBase + "/api/v1/blobs")
+	require.NoError(t, err)
+	return decode[[]domain.Blob](t, resp)
 }
 
 func (n *e2eNode) nodeInfo(t *testing.T) nodeHTTPInfo {
@@ -412,6 +424,68 @@ func TestE2ETwoNodesSync(t *testing.T) {
 		require.Equal(t, http.StatusOK, bresp2.StatusCode)
 		_, _ = io.Copy(io.Discard, bresp2.Body)
 		bresp2.Body.Close()
+	})
+
+	t.Run("blob по blobs.id (UUID) доезжает по потребности", func(t *testing.T) {
+		// Канонический контракт OpenAPI: blob_ids — это blobs.id (UUIDv7), а не
+		// sha256. Потребность B должна резолвить UUID в sha256 через реестр
+		// блобов и тащить файл, а /api/v1/node — показывать referenced/missing.
+		payload := []byte("uuid-referenced photo binary")
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		fw, err := mw.CreateFormFile("file", "photo2.bin")
+		require.NoError(t, err)
+		_, err = fw.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
+
+		req, err := http.NewRequest(http.MethodPost, nodeA.httpBase+"/api/v1/blobs", &buf)
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		blob := decodeBlob(t, resp)
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		// id блоба появляется в реестре A (GET /api/v1/blobs отдаёт UUIDv7)
+		var id string
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+			for _, b := range nodeA.listBlobs(t) {
+				if b.SHA256 == blob.SHA256 {
+					id = b.ID
+					break
+				}
+			}
+			if id != "" {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.NotEmpty(t, id, "blob id not registered on A")
+
+		resp = postJSON(t, nodeA.httpBase+"/api/v1/observations", map[string]any{
+			"observer_id": "observer-4",
+			"location":    "51N 31E",
+			"blob_ids":    []string{id},
+		})
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+		resp.Body.Close()
+
+		nodeA.syncOnce(t)
+		nodeB.syncOnce(t)
+
+		// файл доехал до B и содержимое совпадает
+		bresp, err := http.Get(nodeB.httpBase + "/api/v1/blobs/" + blob.SHA256)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, bresp.StatusCode)
+		require.Equal(t, string(payload), readAll(t, bresp.Body))
+		bresp.Body.Close()
+
+		// срез потребностей B видит файл: referenced > 0, present > 0, missing = 0
+		stats := nodeB.nodeInfo(t).Blobs
+		require.GreaterOrEqual(t, stats.Referenced, 1)
+		require.GreaterOrEqual(t, stats.Present, 1)
+		require.Equal(t, 0, stats.Missing)
 	})
 
 	t.Run("untrusted certificate rejected", func(t *testing.T) {

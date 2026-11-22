@@ -3,10 +3,16 @@ package sqlstore
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 )
 
 // ListActiveReferencedBlobHashes — sha256 блобов, на которые ссылаются АКТИВНЫЕ
-// наблюдения (invalidated_at = 0). Это список потребностей неполного blob-синка:
+// наблюдения (invalidated_at = 0), плюс sha256 PDF-паспортов лошадей из
+// metadata.passport_sha256. Это список потребностей неполного blob-синка:
 // инвалидированные наблюдения остаются в базе как история (их фото удалено
 // событием blob.deleted), но качать их файлы пирам незачем — они выпали из
 // сравнения, поиска и инференса. Хэш, на который ссылается хоть одно живое
@@ -77,16 +83,69 @@ func (s *Store) ListActiveReferencedBlobHashes(ctx context.Context) ([]string, e
 		return nil, fmt.Errorf("sqlstore: list active referenced blob hashes: %w", err)
 	}
 	defer rows.Close()
-	var out []string
+	out := map[string]struct{}{}
 	for rows.Next() {
 		var sha string
 		if err := rows.Scan(&sha); err != nil {
 			return nil, fmt.Errorf("sqlstore: scan active referenced blob hash: %w", err)
 		}
-		out = append(out, sha)
+		out[sha] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlstore: list active referenced blob hashes: %w", err)
+	}
+	// Закрываем выборку до следующих запросов: на sqlite открытый rows держит
+	// соединение, и ListHorses/скан deleted-блобов за ним не пройдут.
+	rows.Close()
+
+	// PDF-паспорта лошадей живут не в наблюдениях, а в metadata.passport_sha256:
+	// без них паспорт не доедет до пиров при неполном синке. Блоб уже sha256,
+	// поэтому ссылку не резолвим, а только отбрасываем мягко удалённые.
+	deleted, err := s.deletedBlobHashes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	horses, err := s.ListHorses(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: list horses for passport blobs: %w", err)
+	}
+	for _, h := range horses {
+		sha := strings.ToLower(strings.TrimSpace(h.Metadata[domain.MetaPassportSHA256]))
+		if !storage.ValidSha256Hex(sha) {
+			continue
+		}
+		if _, dead := deleted[sha]; dead {
+			continue
+		}
+		out[sha] = struct{}{}
+	}
+
+	res := make([]string, 0, len(out))
+	for sha := range out {
+		res = append(res, sha)
+	}
+	sort.Strings(res)
+	return res, nil
+}
+
+// deletedBlobHashes — множество LOWER(sha256) мягко удалённых блобов: их файлы
+// уже удалены, и в потребности неполного синка они не входят.
+func (s *Store) deletedBlobHashes(ctx context.Context) (map[string]struct{}, error) {
+	rows, err := s.query(ctx, `SELECT DISTINCT LOWER(sha256) FROM blobs WHERE deleted_at <> 0`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: list deleted blob hashes: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			return nil, fmt.Errorf("sqlstore: scan deleted blob hash: %w", err)
+		}
+		out[sha] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: list deleted blob hashes: %w", err)
 	}
 	return out, nil
 }
