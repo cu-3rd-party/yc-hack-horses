@@ -63,13 +63,15 @@ type Manager struct {
 
 func New(detector, dir, baseURL string, installed func()) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{Timeout: 2 * time.Hour,
+	m := &Manager{ctx: ctx, stop: cancel, installed: installed, client: &http.Client{
+		Timeout: 2 * time.Hour,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if req.URL.Scheme != "https" || len(via) > 8 {
 				return fmt.Errorf("invalid redirect")
 			}
 			return nil
-		}}}
+		},
+	}}
 	for _, spec := range []struct {
 		id, name, sha, origin string
 		size                  int64
@@ -108,6 +110,25 @@ func New(detector, dir, baseURL string, installed func()) *Manager {
 	}()
 	return m
 }
+
+// AutoDownload стартует загрузку отсутствующих артефактов из пинованных
+// источников. Вызывается приложением после New (в тестах — не вызывается,
+// чтобы тесты менеджера не ходили в сеть за весами).
+func (m *Manager) AutoDownload() {
+	m.mu.Lock()
+	var ids []string
+	for _, a := range m.files {
+		if a.HasSource && a.State == "missing" {
+			ids = append(ids, a.ID)
+		}
+	}
+	m.mu.Unlock()
+	// Start берёт mu сам — держим лок захватываем только на чтение состояний.
+	for _, id := range ids {
+		_ = m.Start(id, "")
+	}
+}
+
 func (m *Manager) check(a *artifact) {
 	_, n, err := installedFile(a.modelFile, a.alternative)
 	state, message := "missing", ""
@@ -141,6 +162,7 @@ func (m *Manager) Status() []Status {
 	}
 	return out
 }
+
 func (m *Manager) find(id string) *artifact {
 	for _, a := range m.files {
 		if a.ID == id {
@@ -203,6 +225,7 @@ func (m *Manager) Start(id, link string) error {
 	}()
 	return nil
 }
+
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -249,7 +272,7 @@ func (m *Manager) download(ctx context.Context, a *artifact, link string, custom
 		a.Total = a.Size
 	}
 	m.mu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(a.path), 0o700); err != nil {
 		return fmt.Errorf("Не удалось создать каталог моделей.")
 	}
 	f, err := os.CreateTemp(filepath.Dir(a.path), ".download-*")

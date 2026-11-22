@@ -188,6 +188,9 @@ func New(cfg *config.Config) (*App, error) {
 			if ip := net.ParseIP(host); host == "localhost" || host == "" || host == "0.0.0.0" || host == "::" || (ip != nil && ip.IsLoopback()) {
 				detector.ModelsChanged(partsDir)
 				assets = modelassets.New(modelPath, partsDir, cfg.Inference.ModelBaseURL, func() { detector.ModelsChanged(partsDir) })
+				// Веса не запечены в образ — тянем недостающие сразу при старте
+				// в $DATA_DIR/models (live on PVC у центральной ноды).
+				assets.AutoDownload()
 				a.addStop(assets.Close)
 			}
 		}
