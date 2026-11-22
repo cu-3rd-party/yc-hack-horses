@@ -265,16 +265,17 @@ func buildOpenAPISpec() []byte {
 			"и studbook_number. Повторная загрузка заменяет паспорт; паспорт синхронизируется на другие ноды.")
 	putPassport.Parameters = []parameter{idParam("id", "UUID лошади")}
 	putPassport.RequestBody = &requestBody{
-		Description: "multipart/form-data с полями file и studbook_number.",
+		Description: "Ровно один PDF в поле file. При ошибке прежний паспорт сохраняется.",
 		Required:    true,
 		Content: map[string]mediaTypeValue{
-			"multipart/form-data": {Schema: schemaNode{"type": "object"}.
+			"multipart/form-data": {Schema: schemaNode{"type": "object", "required": []string{"file"}}.
 				prop("file", schemaNode{"type": "string", "format": "binary", "description": "PDF до 50 MiB"}).
 				prop("studbook_number", strSchema("номер по племенной книге, например 7706"))},
 		},
 	}
 	putPassport.Responses = merge(stdErrors(true), map[string]resp{
 		"200": okJSON(schemaNode{"$ref": "#/components/schemas/Horse"}),
+		"400": {Description: "требуется multipart/form-data с одним файлом в поле file", Content: errorRef},
 		"413": {Description: "файл больше 50 MiB", Content: errorRef},
 		"415": {Description: "файл не PDF", Content: errorRef},
 	})

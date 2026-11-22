@@ -1472,6 +1472,11 @@ option:checked > .option-check {
   cursor: default;
   background: var(--surface);
 }
+.passport-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .passport-body {
   flex: 1;
   min-height: 0;

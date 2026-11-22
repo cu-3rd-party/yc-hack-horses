@@ -1,6 +1,7 @@
 // The caller owns the disposable Go node and the browser or Electron window.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 export async function checkPassports(page, origin, client) {
   async function create(name, metadata = {}) {
@@ -47,6 +48,40 @@ export async function checkPassports(page, origin, client) {
   assert.ok(await open.isDisabled());
   await page.getByText('Паспорт не прикреплён').waitFor();
   assert.equal(requested.size, 0);
+  const fixture = name => fileURLToPath(new URL('./fixtures/passport-' + name + '.pdf', import.meta.url));
+  const picker = dialog.getByLabel('Файл паспорта');
+  const savedPDF = async () => {
+    const response = await fetch(origin + '/api/v1/horses/' + missing + '/passport');
+    assert.equal(response.status, 200);
+    return Buffer.from(await response.arrayBuffer());
+  };
+  await button('Загрузить паспорт').click();
+  assert.ok(await button('Загрузить').isDisabled());
+  await picker.setInputFiles({ name: 'broken.pdf', mimeType: 'application/pdf', buffer: Buffer.from('broken') });
+  await button('Загрузить').click();
+  await dialog.getByRole('alert').getByText('Выберите документ в формате PDF.').waitFor();
+  assert.equal(requested.size, 0);
+  await picker.setInputFiles(fixture('atlas'));
+  await button('Загрузить').click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(await savedPDF(), await readFile(fixture('atlas')));
+  await open.click();
+  await dialog.getByText('Passport Atlas - page 1', { exact: true }).waitFor();
+  await close();
+  await button('Обновить паспорт').click();
+  await dialog.getByRole('heading', { name: 'Обновить паспорт?' }).waitFor();
+  await picker.setInputFiles(fixture('orion'));
+  await button('Отменить').click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(await savedPDF(), await readFile(fixture('atlas')));
+  await button('Обновить паспорт').click();
+  await picker.setInputFiles(fixture('orion'));
+  await button('Обновить').click();
+  await dialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(await savedPDF(), await readFile(fixture('orion')));
+  await open.click();
+  await dialog.getByText('Passport Orion - page 1', { exact: true }).waitFor();
+  await close();
   await back.click();
   await choose('Атлас');
   const search = page.getByRole('textbox', { name: 'Поиск по названию' });
@@ -80,6 +115,25 @@ export async function checkPassports(page, origin, client) {
   await open.click();
   await dialog.getByText('Не удалось открыть PDF').waitFor();
   await close();
-  assert.ok(!requested.has(missing));
-  console.log(client + ': separate passports, zoom, scroll, empty state, retry and corrupt PDF passed.');
+  assert.ok(requested.has(missing));
+
+  const liveRequests = [];
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.endsWith('/passport')) liveRequests.push(request.method());
+  });
+  await button('Настройки').click();
+  await page.getByRole('switch', { name: 'Демосценарии' }).click();
+  await button('Особи').click();
+  await page.getByText('Сарана', { exact: true }).click();
+  await button('Загрузить паспорт').click();
+  await picker.setInputFiles(fixture('orion'));
+  await button('Загрузить').click();
+  await dialog.waitFor({ state: 'hidden' });
+  await page.reload();
+  await button('Особи').click();
+  await page.getByText('Сарана', { exact: true }).click();
+  await open.click();
+  await dialog.getByText('Passport Orion - page 1', { exact: true }).waitFor();
+  assert.deepEqual(liveRequests, []);
+  console.log(client + ': passport upload, cancel, replacement, viewer, retry and offline demo persistence passed.');
 }

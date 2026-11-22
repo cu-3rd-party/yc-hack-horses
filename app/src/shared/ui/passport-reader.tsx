@@ -2,8 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { LoaderCircle, ZoomIn, ZoomOut } from 'lucide-react';
 import type { PDFDocumentLoadingTask } from 'pdfjs-dist';
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
+import { readDemoPassport } from '../../journal/api';
+import { useDemo } from '../../journal/mode';
+import { readNodePassport } from '../../journal/node';
 
 export function PassportReader({ horseId }: { horseId: string }) {
+  const demo = useDemo();
   const container = useRef<HTMLDivElement>(null);
   const reader = useRef<PDFViewer | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -18,15 +22,13 @@ export function PassportReader({ horseId }: { horseId: string }) {
     setError('');
 
     async function open() {
-      const path = '/api/v1/horses/' + encodeURIComponent(horseId) + '/passport';
-      const response = await fetch(path, { signal });
+      const file = demo ? await readDemoPassport(horseId) : await readNodePassport(horseId, signal);
       if (signal.aborted) return;
-      if (response.status === 404) {
+      if (!file) {
         setError('Файл паспорта пока недоступен');
         return;
       }
-      if (!response.ok) throw new Error('Passport request failed');
-      const [pdf, bytes] = await Promise.all([import('./passport-pdf'), response.arrayBuffer()]);
+      const [pdf, bytes] = await Promise.all([import('./passport-pdf'), file.arrayBuffer()]);
       if (signal.aborted) return;
       task = pdf.loadPassport(bytes);
       const passport = await task.promise;
@@ -50,7 +52,7 @@ export function PassportReader({ horseId }: { horseId: string }) {
       reader.current = null;
       void task?.destroy();
     };
-  }, [horseId, attempt]);
+  }, [horseId, demo, attempt]);
 
   return (
     <>

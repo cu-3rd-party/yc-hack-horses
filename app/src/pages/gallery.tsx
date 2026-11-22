@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, ChevronLeft, ChevronRight, FileText, Search } from 'lucide-react';
+import { ArrowUpRight, ChevronLeft, ChevronRight, FileText, Search, Upload } from 'lucide-react';
+import { PassportUpload } from './passport-upload';
 import { useHorseHistory } from '../journal/use-journal';
 import { describeTraits, horsePhotos, type Notebook, type Photo } from '../journal/types';
 import { Heading, Back, Modal, Toggle } from '../shared/ui/journal-ui';
@@ -12,6 +13,7 @@ export function Gallery({ book }: { book: Notebook }) {
     [search, setSearch] = useState('');
   const [active, setActive] = useState<number | null>(null);
   const [passportOpen, setPassportOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const horse = book.horses.find((h) => h.id === selected);
   const history = useHorseHistory(book, horse?.id);
   const observations = history.data ?? book.observations.filter((o) => o.horseId === horse?.id);
@@ -36,18 +38,25 @@ export function Gallery({ book }: { book: Notebook }) {
         )}
         <PhotoGrid photos={photos} onSelect={(photo) => setActive(photos.indexOf(photo))}>
           <div className="passport-action">
-            <button
-              type="button"
-              className="filter-trigger"
-              disabled={!horse.passportSha256}
-              aria-describedby={horse.passportSha256 ? undefined : 'passport-missing'}
-              onClick={() => setPassportOpen(true)}
-            >
-              <FileText size={16} aria-hidden="true" /> Открыть паспорт
-            </button>
+            <div className="passport-buttons">
+              <button
+                type="button"
+                className="filter-trigger"
+                disabled={!horse.passportSha256}
+                aria-describedby={horse.passportSha256 ? undefined : 'passport-missing'}
+                onClick={() => setPassportOpen(true)}
+              >
+                <FileText size={16} aria-hidden="true" /> Открыть паспорт
+              </button>
+              <button type="button" className="filter-trigger" onClick={() => setUploadOpen(true)}>
+                <Upload size={16} aria-hidden="true" />
+                {horse.passportSha256 ? 'Обновить паспорт' : 'Загрузить паспорт'}
+              </button>
+            </div>
             {!horse.passportSha256 && <small id="passport-missing">Паспорт не прикреплён</small>}
           </div>
         </PhotoGrid>
+        {uploadOpen && <PassportUpload horse={horse} close={() => setUploadOpen(false)} />}
         {passportOpen && horse.passportSha256 && (
           <Modal fullscreen title={'Паспорт · ' + horse.name} onClose={() => setPassportOpen(false)}>
             <PassportReader key={horse.id + horse.passportSha256} horseId={horse.id} />

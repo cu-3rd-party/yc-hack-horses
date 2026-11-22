@@ -24,6 +24,7 @@ import { useCommand, useHorseHistory } from '../journal/use-journal';
 import { Heading, Modal, Pager, Toggle, useNotice } from '../shared/ui/journal-ui';
 import { MarkedPhoto, PhotoGrid, Thumbnail } from '../shared/ui/photos';
 import { Button } from '../shared/ui/button';
+import { FileDropzone } from '../shared/ui/file-dropzone';
 
 export interface PhotoBatch {
   files: File[];
@@ -68,10 +69,8 @@ export function ReviewPage(props: IntakeProps) {
   );
 }
 function Intake({ book, batch, setBatch, openLog, onBusyChange }: IntakeProps) {
-  const picker = useRef<HTMLInputElement>(null),
-    locked = useRef(false);
+  const locked = useRef(false);
   const [loading, setLoading] = useState(false);
-  const [drag, setDrag] = useState(false);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
   const [emptyResult, setEmptyResult] = useState(false);
@@ -138,50 +137,11 @@ function Intake({ book, batch, setBatch, openLog, onBusyChange }: IntakeProps) {
       <div className="intake-grid">
         <section aria-label="Загрузка фотографии">
           <h2 className="intake-label">Полевой снимок</h2>
-          <input
-            type="file"
-            multiple
-            className="sr-only"
-            aria-label="Файл наблюдения"
-            tabIndex={-1}
-            ref={picker}
-            accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl"
-            disabled={uploadDisabled}
-            onChange={(e) => {
-              pick(e.target.files);
-              e.target.value = '';
-            }}
+          <FileDropzone
+            label="Файл наблюдения" accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl" multiple
+            disabled={uploadDisabled} busyLabel={loading ? 'Анализируем снимок…' : undefined}
+            invalid={!!error} describedBy="upload-feedback" onFiles={pick}
           />
-          <button
-            className={'dropzone' + (drag ? ' drag' : '') + (error ? ' invalid' : '')}
-            disabled={uploadDisabled}
-            aria-busy={loading}
-            aria-describedby="upload-feedback"
-            onClick={() => picker.current?.click()}
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (!uploadDisabled) setDrag(true);
-            }}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDrag(false);
-              pick(e.dataTransfer.files);
-            }}
-          >
-            {loading && <LoaderCircle className="spin" size={18} />}
-            <span>
-              {loading ? (
-                'Анализируем снимок…'
-              ) : (
-                <>
-                  <strong>Выберите файлы</strong> или перетащите их сюда
-                </>
-              )}
-            </span>
-          </button>
           {emptyResult && <p role="status">На снимке не обнаружено лошадей.</p>}
           {(batch || fileName) && (
             <div className="file-state" role="status">
