@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, ChevronLeft, ChevronRight, FileText, Search } from 'lucide-react';
-import { demoPassportUrl } from '../journal/fixtures';
 import { useHorseHistory } from '../journal/use-journal';
 import { describeTraits, horsePhotos, type Notebook, type Photo } from '../journal/types';
 import { Heading, Back, Modal, Toggle } from '../shared/ui/journal-ui';
@@ -17,10 +16,7 @@ export function Gallery({ book }: { book: Notebook }) {
   const history = useHorseHistory(book, horse?.id);
   const observations = history.data ?? book.observations.filter((o) => o.horseId === horse?.id);
   const photos = observations.flatMap((o) => o.photos);
-  if (horse) {
-    const passportUrl = book.node
-      ? horse.passportSha256 && '/api/v1/horses/' + encodeURIComponent(horse.id) + '/passport'
-      : demoPassportUrl(horse.id);
+  if (horse)
     return (
       <>
         <Back onClick={() => setSelected(null)}>Назад к особям</Back>
@@ -43,18 +39,18 @@ export function Gallery({ book }: { book: Notebook }) {
             <button
               type="button"
               className="filter-trigger"
-              disabled={!passportUrl}
-              aria-describedby={passportUrl ? undefined : 'passport-missing'}
+              disabled={!horse.passportSha256}
+              aria-describedby={horse.passportSha256 ? undefined : 'passport-missing'}
               onClick={() => setPassportOpen(true)}
             >
               <FileText size={16} aria-hidden="true" /> Открыть паспорт
             </button>
-            {!passportUrl && <small id="passport-missing">Паспорт не прикреплён</small>}
+            {!horse.passportSha256 && <small id="passport-missing">Паспорт не прикреплён</small>}
           </div>
         </PhotoGrid>
-        {passportOpen && passportUrl && (
+        {passportOpen && horse.passportSha256 && (
           <Modal fullscreen title={'Паспорт · ' + horse.name} onClose={() => setPassportOpen(false)}>
-            <PassportReader key={horse.passportSha256 ?? passportUrl} url={passportUrl} />
+            <PassportReader key={horse.id + horse.passportSha256} horseId={horse.id} />
           </Modal>
         )}
         {observations
@@ -75,7 +71,6 @@ export function Gallery({ book }: { book: Notebook }) {
         )}
       </>
     );
-  }
   const visible = book.horses.filter((h) => h.name.toLowerCase().includes(search.toLowerCase()));
   return (
     <>

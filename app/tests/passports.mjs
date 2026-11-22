@@ -83,31 +83,3 @@ export async function checkPassports(page, origin, client) {
   assert.ok(!requested.has(missing));
   console.log(client + ': separate passports, zoom, scroll, empty state, retry and corrupt PDF passed.');
 }
-
-export async function checkDemoPassports(page, names) {
-  const liveRequests = [];
-  const track = request => {
-    if (new URL(request.url()).pathname.startsWith('/api/v1/')) liveRequests.push(request.url());
-  };
-  page.on('request', track);
-  try {
-    const button = name => page.getByRole('button', { name, exact: true });
-    for (const name of names) {
-      await page.getByText(name, { exact: true }).click();
-      await button('Открыть паспорт').click();
-      const dialog = page.getByRole('dialog', { name: 'Паспорт · ' + name });
-      const pages = dialog.locator('.pdfViewer .page');
-      await pages.first().getByText(name, { exact: true }).waitFor();
-      await pages.first().locator('canvas').first().waitFor();
-      assert.equal(await pages.count(), 2);
-      await pages.nth(1).scrollIntoViewIfNeeded();
-      await pages.nth(1).getByText('Полевое наблюдение', { exact: true }).waitFor();
-      await dialog.getByRole('button', { name: 'Закрыть' }).click();
-      await dialog.waitFor({ state: 'hidden' });
-      await button('Назад к особям').click();
-    }
-    assert.deepEqual(liveRequests, []);
-  } finally {
-    page.off('request', track);
-  }
-}

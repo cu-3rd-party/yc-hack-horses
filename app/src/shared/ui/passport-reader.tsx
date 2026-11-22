@@ -3,7 +3,7 @@ import { LoaderCircle, ZoomIn, ZoomOut } from 'lucide-react';
 import type { PDFDocumentLoadingTask } from 'pdfjs-dist';
 import type { PDFViewer } from 'pdfjs-dist/web/pdf_viewer.mjs';
 
-export function PassportReader({ url }: { url: string }) {
+export function PassportReader({ horseId }: { horseId: string }) {
   const container = useRef<HTMLDivElement>(null);
   const reader = useRef<PDFViewer | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -18,7 +18,8 @@ export function PassportReader({ url }: { url: string }) {
     setError('');
 
     async function open() {
-      const response = await fetch(url, { signal });
+      const path = '/api/v1/horses/' + encodeURIComponent(horseId) + '/passport';
+      const response = await fetch(path, { signal });
       if (signal.aborted) return;
       if (response.status === 404) {
         setError('Файл паспорта пока недоступен');
@@ -49,7 +50,7 @@ export function PassportReader({ url }: { url: string }) {
       reader.current = null;
       void task?.destroy();
     };
-  }, [url, attempt]);
+  }, [horseId, attempt]);
 
   return (
     <>
