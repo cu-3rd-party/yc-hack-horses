@@ -33,6 +33,10 @@ import (
 type Engine struct {
 	cfg Config
 
+	// modelVersion — версия модели, распознанная по пути/метаданным (New):
+	// yolov8n-coco-v1 по умолчанию, yolo11s-coco-v1 для экспорта YOLO11s.
+	modelVersion string
+
 	life        sync.RWMutex
 	reidOnce    sync.Once
 	encoder     *reid.Encoder
@@ -57,7 +61,7 @@ func New(cfg Config) *Engine {
 	if cfg.Delegate == nil {
 		cfg.Delegate = NewHistogramDelegate()
 	}
-	return &Engine{cfg: cfg}
+	return &Engine{cfg: cfg, modelVersion: modelVersionForPath(cfg.ModelPath)}
 }
 
 // ensureSession лениво инициализирует onnxruntime и сессию модели.
@@ -153,7 +157,7 @@ func (e *Engine) ExtractTraits(ctx context.Context, input inference.ImageInput) 
 		return inference.TraitResult{}, err
 	}
 	return inference.TraitResult{
-		ModelVersion: ModelVersion,
+		ModelVersion: e.modelVersion,
 		Traits:       traits,
 		Confidence:   best.Confidence,
 	}, nil
@@ -231,7 +235,7 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 				}
 			}
 		} else {
-			row.Embedding = inference.EmbeddingResult{ModelVersion: ModelVersion, Vector: poolEmbedding(makeCrops(img, row.Box).Body)}
+			row.Embedding = inference.EmbeddingResult{ModelVersion: e.modelVersion, Vector: poolEmbedding(makeCrops(img, row.Box).Body)}
 		}
 	}
 	return rows, nil
