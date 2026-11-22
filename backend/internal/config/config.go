@@ -97,7 +97,8 @@ type Config struct {
 	Api struct {
 		// DocsEnabled — Scalar UI (/api/scalar) и OpenAPI-спека. Включается
 		// только на central-ноде; локальные ноды держат выключенным.
-		DocsEnabled bool `yaml:"docs_enabled"`
+		DocsEnabled bool   `yaml:"docs_enabled"`
+		WebDir      string `yaml:"web_dir"`
 	} `yaml:"api"`
 	LogLevel   string `yaml:"log_level"`
 	AppVersion string `yaml:"app_version"`
@@ -174,6 +175,7 @@ func (c *Config) applyEnv() {
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
 	envString("INFER_REID_MODEL_DIR", &c.Inference.ReIDModelDir)
+	envString("WEB_DIR", &c.Api.WebDir)
 	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
 	envBool("ENROLLMENT_ENABLED", &c.Enrollment.Enabled)
 	envString("ENROLLMENT_TOKEN", &c.Enrollment.Token)

@@ -22,7 +22,7 @@ services:
       timeout: 5s
       retries: 10
   node:
-    # Локально: docker build -f backend/Dockerfile -t git.cu3rd.ru/cu3rd/yc-hack-horses:local backend
+    # Локально: docker build -f backend/Dockerfile -t git.cu3rd.ru/cu3rd/yc-hack-horses:local .
     # В CI образ публикуется джобой deploy с тегом sha.
     image: ${NODE_IMAGE:-git.cu3rd.ru/cu3rd/yc-hack-horses:local}
     restart: unless-stopped

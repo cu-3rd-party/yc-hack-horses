@@ -19,6 +19,7 @@ jobs:
     container: ghcr.io/catthehacker/ubuntu:act-24.04
     options: --cpus 2 --memory 2g
     outputs:
+      image: ${{ steps.changes.outputs.image }}
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
     steps:
@@ -111,12 +112,13 @@ jobs:
           file app/build/node/darwin-arm64/loshid-node | grep -q arm64
 
   build-image:
-    needs: [changes, build-backend]
+    needs: [changes, build-backend, build-frontend]
     # docker CLI есть только в act-образе; сборка/пуш — отдельной джобой.
     if: >-
       always() && !cancelled() &&
-      needs.changes.outputs.backend == 'true' &&
-      needs.build-backend.result == 'success'
+      needs.changes.outputs.image == 'true' &&
+      (needs.build-backend.result == 'success' || needs.build-backend.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
     runs-on: homelab-docker
     container: ghcr.io/catthehacker/ubuntu:act-24.04
     options: --cpus 2 --memory 2g
@@ -125,31 +127,28 @@ jobs:
         with:
           persist-credentials: false
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish image
+      - name: Build and smoke-test web image
+        env:
+          IMAGE: git.cu3rd.ru/cu3rd/yc-hack-horses:${{ github.sha }}
+        run: |
+          set -eu
+          docker build --cpuset-cpus 0-3 --memory 4g -f backend/Dockerfile -t "$IMAGE" .
+          journal=$(docker run -d -e API_DOCS_ENABLED=true "$IMAGE")
+          trap 'docker rm -fv "$journal" >/dev/null' EXIT
+          docker run --rm -i --network "container:$journal" node:22-bookworm-slim node --input-type=module - < .ci/smoke-web.mjs
+      - name: Publish web image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         env:
           REGISTRY_USER: ${{ vars.REGISTRY_USER }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE: git.cu3rd.ru/cu3rd/yc-hack-horses:${{ github.sha }}
         run: |
-          # Публичный пакет (visibility public): раннер и чарт тянут без pull-секрета.
-          image="git.cu3rd.ru/cu3rd/yc-hack-horses"
+          set -eu
           export DOCKER_CONFIG
           DOCKER_CONFIG=$(mktemp -d)
           trap 'rm -rf "$DOCKER_CONFIG"' EXIT
           printf '%s' "$REGISTRY_TOKEN" | docker login git.cu3rd.ru --username "$REGISTRY_USER" --password-stdin
-          if [ -f backend/Dockerfile ]; then
-            if docker build --cpuset-cpus 0-3 --memory 4g -f backend/Dockerfile -t "$image:$IMAGE_TAG" backend; then
-              if [ "${{ github.event_name }}" != "pull_request" ]; then docker push "$image:$IMAGE_TAG"; fi
-              exit 0
-            else
-              echo '::warning::сборка backend/Dockerfile упала — отдаём черновой образ /health, чтобы доставка не висла'
-            fi
-          else
-            echo '::warning::backend/Dockerfile ещё не готов — собираем черновой образ /health'
-          fi
-          docker build --cpuset-cpus 0-3 --memory 4g -f infra/deploy/Dockerfile.draft -t "$image:$IMAGE_TAG" infra/deploy
-          # Push только на master: из PR образы не публикуем.
-          if [ "${{ github.event_name }}" != "pull_request" ]; then docker push "$image:$IMAGE_TAG"; fi
+          docker push "$IMAGE"
 
   deploy:
     needs: [changes, build-image]
@@ -166,7 +165,7 @@ jobs:
     container: ghcr.io/catthehacker/ubuntu:act-24.04
     options: --cpus 2 --memory 2g
     steps:
-      - name: Propose self-service deployment (backend)
+      - name: Propose self-service deployment (web)
         uses: https://git.cu3rd.ru/cu3rd/self-service/actions/deploy@master
         with:
           project: yc-hack-horses

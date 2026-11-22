@@ -1,5 +1,6 @@
 import { ModelPanel, useModels } from './models';
 import { setDemo, useDemo } from '../journal/mode';
+import { desktop } from '../journal/node';
 import { version } from '../../package.json';
 import { useState } from 'react';
 import { Activity, Database, Images, ListChecks, RefreshCw, RotateCcw } from 'lucide-react';
@@ -29,13 +30,13 @@ export function Dashboard({ book }: { book: Notebook }) {
   if (book.node)
     return (
       <>
-        <Heading title="Сводка" description="Локальный полевой журнал" />
+        <Heading title="Сводка" description="Полевой журнал" />
         <section className="panel">
           <Facts
             rows={[
               ['Особи', book.horses.length],
               ['Наблюдения', book.observations.length],
-              ['Локальный узел', book.node.node_id],
+              ['Узел журнала', book.node.node_id],
               ['События', book.node.event_count],
             ]}
           />
@@ -82,7 +83,7 @@ export function Sync({ book }: { book: Notebook }) {
   if (book.node)
     return (
       <>
-        <Heading title="Синхронизация" description="Состояние обмена по данным локальной ноды." />
+        <Heading title="Синхронизация" description="Состояние обмена по данным ноды журнала." />
         <section className="panel">
           <h2>Узлы обмена</h2>
           {book.node.sync?.length ? (
@@ -169,6 +170,7 @@ export function Sync({ book }: { book: Notebook }) {
 }
 export function Settings({ book }: { book?: Notebook }) {
   const demo = useDemo();
+  const source = desktop ? 'Локальная нода · 127.0.0.1:8080' : `Сервер журнала · ${window.location.host}`;
   const setup = useModels(!demo && Boolean(book?.node));
   const [theme, setTheme] = useState(initialScheme);
   const [reset, setReset] = useState(false),
@@ -202,7 +204,7 @@ export function Settings({ book }: { book?: Notebook }) {
       <section className="panel">
         <h2>Источник данных</h2>
         <div className="setting">
-          <p>{demo ? 'Примеры и записи на этом устройстве' : 'Локальная нода · 127.0.0.1:8080'}</p>
+          <p>{demo ? 'Примеры и записи на этом устройстве' : source}</p>
           <Toggle label="Демосценарии" on={demo} onChange={() => setDemo(!demo)} />
         </div>
       </section>
@@ -256,7 +258,7 @@ export function Settings({ book }: { book?: Notebook }) {
             <h2>Рабочее пространство</h2>
             <Facts
               rows={[
-                ['Локальный узел', book?.node?.node_id ?? 'Нет соединения'],
+                ['Узел журнала', book?.node?.node_id ?? 'Нет соединения'],
                 ['Хранилище', book?.node?.driver ?? '—'],
                 ['Версия приложения', version],
               ]}

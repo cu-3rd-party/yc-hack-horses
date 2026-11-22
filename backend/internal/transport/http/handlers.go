@@ -325,6 +325,9 @@ func getBlob(d Deps) http.HandlerFunc {
 			notFoundOrServerError(w, err, "blob")
 			return
 		}
+		// Uploaded originals may also be opened as documents on the journal origin.
+		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if meta.MimeType != "" {
 			w.Header().Set("Content-Type", meta.MimeType)
 		}

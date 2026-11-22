@@ -8,6 +8,7 @@ import {
   CircleAlert,
   UserRoundPlus,
 } from 'lucide-react';
+import { desktop } from '../journal/node';
 import { ModelPanel, useModels } from './models';
 import { samplePhoto } from '../journal/fixtures';
 import {
@@ -49,6 +50,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
   const setup = useModels(Boolean(book.node));
   const pending = useRef<File | null>(null);
   const waiting = Boolean(book.node && (setup.isPending || setup.isError || (setup.data && !setup.data.ready)));
+  const uploadDisabled = loading || (!desktop && waiting);
   useEffect(() => {
     const file = pending.current;
     if (!waiting && file) {
@@ -76,7 +78,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
     }
   }
   function pick(files: FileList | null) {
-    if (!files?.length || locked.current) return;
+    if (!files?.length || locked.current || uploadDisabled) return;
     if (files.length !== 1) {
       setFileName('');
       setError('Выберите одну фотографию за раз.');
@@ -111,7 +113,7 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
             tabIndex={-1}
             ref={picker}
             accept="image/*,.heic,.heif,.tif,.tiff,.dng,.avif,.jxl"
-            disabled={loading}
+            disabled={uploadDisabled}
             onChange={(e) => {
               pick(e.target.files);
               e.target.value = '';
@@ -119,13 +121,13 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
           />
           <button
             className={'dropzone' + (drag ? ' drag' : '') + (error ? ' invalid' : '')}
-            disabled={loading}
+            disabled={uploadDisabled}
             aria-busy={loading}
             aria-describedby="upload-feedback"
             onClick={() => picker.current?.click()}
             onDragOver={(e) => {
               e.preventDefault();
-              if (!loading) setDrag(true);
+              if (!uploadDisabled) setDrag(true);
             }}
             onDragLeave={(e) => {
               if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false);
@@ -163,7 +165,9 @@ function Intake({ book, openLog, onBusyChange }: IntakeProps) {
             </div>
           ) : (
             <p className="file-hint" id="upload-feedback">
-              Одна фотография за раз. JPG, PNG, HEIC, TIFF и другие форматы изображений.
+              {desktop
+                ? 'Одна фотография за раз. JPG, PNG, HEIC, TIFF и другие форматы изображений.'
+                : 'Одна фотография за раз в формате, который поддерживает браузер, например JPG или PNG.'}
             </p>
           )}
         </section>

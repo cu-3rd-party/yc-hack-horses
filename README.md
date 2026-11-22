@@ -79,9 +79,15 @@ API_DOCS_ENABLED=true          # env, либо api.docs_enabled: true в node.ya
 Central нода живёт в self-service как проект `yc-hack-horses` (env `prod`, зона `grm`,
 домен `yc-hack-horses.cu3rd.ru`, порт 8080, healthcheck `/health`), Postgres — платформенный
 ресурс, `DATABASE_URL` приходит из него. Push в `master` запускает `.forgejo/workflows/ci.yml`:
-сборка+тест backend, сборка клиентского фронтенда (`app/`), проверка desktop-клиента,
-затем джоба `deploy` публикует образ `git.cu3rd.ru/cu3rd-private/yc-hack-horses:<sha>` и
-вызывает деплой self-service (project/environment/app). Статус: `ss status yc-hack-horses prod`.
+при изменении веб-интерфейса или Go-ноды CI собирает общий образ из корня репозитория,
+проверяет его по HTTP и публикует `git.cu3rd.ru/cu3rd/yc-hack-horses:<sha>`.
+Затем Forgejo обновляет приложение `web` в `prod`. Статус доставки показывает `ss status yc-hack-horses prod`.
+
+[Веб-журнал](https://yc-hack-horses.cu3rd.ru/) открывает данные центральной ноды через `/api/v1`.
+Демосценарии включаются в настройках браузера. Для локальной сборки общего образа выполните
+`docker build -f backend/Dockerfile -t git.cu3rd.ru/cu3rd/yc-hack-horses:local .`.
+В образе `WEB_DIR=/app/web` указывает на собранный интерфейс. Для разработки можно запустить
+`npm run dev` из `app/` с локальной нодой на порту 8080.
 
 ## Релизы (тег v*)
 
