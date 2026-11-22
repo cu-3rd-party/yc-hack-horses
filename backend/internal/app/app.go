@@ -182,7 +182,10 @@ func New(cfg *config.Config) (*App, error) {
 		if cfg.Inference.ComparisonURL == "" {
 			modelMode = "local"
 			host, _, _ := net.SplitHostPort(cfg.Network.ListenAddr)
-			if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			// Пустой хост (":8080" — все интерфейсы, кейс central в self-service)
+			// тоже разрешаем: иначе менеджер моделей не создаётся и
+			// /api/v1/models навсегда отдаёт ready=false.
+			if ip := net.ParseIP(host); host == "localhost" || host == "" || host == "0.0.0.0" || host == "::" || (ip != nil && ip.IsLoopback()) {
 				detector.ModelsChanged(partsDir)
 				assets = modelassets.New(modelPath, partsDir, cfg.Inference.ModelBaseURL, func() { detector.ModelsChanged(partsDir) })
 				a.addStop(assets.Close)
