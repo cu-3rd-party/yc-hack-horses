@@ -1,0 +1,42 @@
+# Шаблон spec для RPM локальной ноды yc-hack-horses.
+# Версия подставляется из тега релиза (@VERSION@), сборка — release-node-rpm в CI.
+Name:           yc-hack-horses-node
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        yc-hack-horses local node (Przewalski horse recognition)
+License:        Apache-2.0
+URL:            https://git.cu3rd.ru/cu3rd/yc-hack-horses
+ExclusiveArch:  x86_64
+AutoReqProv:    no
+
+Source0:        node
+Source1:        node.example.yaml
+Source2:        libonnxruntime.so.1.31.1
+Source3:        yc-hack-horses-node.service
+
+%description
+Локальная нода yc-hack-horses: YOLO-детекция + reid-распознавание лошадей
+Пржевальского, синхронизация с центральной нодой по mTLS.
+Включает libonnxruntime (Microsoft.ML.OnnxRuntime 1.31.1, NuGet) — бинарь
+линкуется динамически через rpath. Веса моделей не входят в пакет и
+скачиваются при первом старте в DATA_DIR (/var/lib/yc-hack-horses).
+
+%prep
+
+%build
+
+%install
+install -D -m 0755 %{SOURCE0} %{buildroot}%{_bindir}/yc-hack-horses
+install -D -m 0644 %{SOURCE2} %{buildroot}%{_libdir}/yc-hack-horses/libonnxruntime.so.1.31.1
+ln -s libonnxruntime.so.1.31.1 %{buildroot}%{_libdir}/yc-hack-horses/libonnxruntime.so
+install -D -m 0644 %{SOURCE1} %{buildroot}%{_sysconfdir}/yc-hack-horses/node.example.yaml
+install -D -m 0644 %{SOURCE3} %{buildroot}%{_unitdir}/yc-hack-horses.service
+
+%files
+%dir %{_sysconfdir}/yc-hack-horses
+%{_bindir}/yc-hack-horses
+%{_libdir}/yc-hack-horses/
+%config(noreplace) %{_sysconfdir}/yc-hack-horses/node.example.yaml
+%{_unitdir}/yc-hack-horses.service
+
+%changelog

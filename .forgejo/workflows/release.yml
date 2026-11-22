@@ -37,6 +37,49 @@ jobs:
           name: backend-linux-amd64
           path: backend-linux-amd64.tar.gz
 
+  release-node-rpm:
+    name: node RPM (linux-amd64)
+    needs: [release-backend]
+    runs-on: homelab-docker
+    container: ghcr.io/catthehacker/ubuntu:act-24.04
+    options: --cpus 2 --memory 2g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v3
+        with:
+          name: backend-linux-amd64
+          path: artifact
+      - name: Build RPM
+        env:
+          VERSION: ${{ github.ref_name }}
+        # В rpm кладём бинарь + libonnxruntime.so (NuGet, как в download-yolo-model.sh) +
+        # systemd-юнит и пример конфига: «скачал — работает», модель качается при старте в DATA_DIR.
+        run: |
+          set -e
+          apt-get update && apt-get install -y --no-install-recommends rpm
+          ver=${VERSION#v}
+          mkdir -p rpmbuild/SOURCES rpmbuild/SPECS
+          tar xzf artifact/backend-linux-amd64.tar.gz -C artifact
+          cp artifact/node rpmbuild/SOURCES/
+          cp backend/config.example.yaml rpmbuild/SOURCES/node.example.yaml
+          curl -fsSL -o /tmp/ort.nupkg https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.1/microsoft.ml.onnxruntime.1.31.1.nupkg
+          python3 - <<'EOF'
+          import zipfile, shutil
+          with zipfile.ZipFile("/tmp/ort.nupkg") as z, z.open("runtimes/linux-x64/native/libonnxruntime.so") as s, open("rpmbuild/SOURCES/libonnxruntime.so.1.31.1", "wb") as d:
+              shutil.copyfileobj(s, d)
+          EOF
+          cp infra/systemd/yc-hack-horses-node.service rpmbuild/SOURCES/
+          sed -e "s/@VERSION@/$ver/g" infra/packaging/node.spec.in > rpmbuild/SPECS/yc-hack-horses-node.spec
+          rpmbuild -ba --define "_topdir $PWD/rpmbuild" rpmbuild/SPECS/yc-hack-horses-node.spec
+          cp rpmbuild/RPMS/x86_64/yc-hack-horses-node-*.rpm .
+      - uses: actions/upload-artifact@v3
+        with:
+          name: node-rpm
+          path: yc-hack-horses-node-*.rpm
+
   release-frontend-dist:
     name: frontend dist (Electron)
     runs-on: homelab-docker
@@ -128,7 +171,7 @@ jobs:
 
   release-publish:
     name: Create draft release
-    needs: [release-backend, release-desktop, release-mobile]
+    needs: [release-backend, release-node-rpm, release-desktop, release-mobile]
     # backend обязателен; desktop/mobile не блокируют релиз (если упали — артефактов просто нет)
     if: always() && !cancelled() && needs.release-backend.result == 'success'
     runs-on: homelab-docker

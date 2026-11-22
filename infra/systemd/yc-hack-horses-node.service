@@ -1,0 +1,26 @@
+# systemd-юнит локальной ноды yc-hack-horses (ставится rpm-ом).
+[Unit]
+Description=yc-hack-horses local node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Нода работает под отдельным пользователем; веса моделей качаются при старте
+# в DATA_DIR (см. ADR-0012: веса не в git, не в образе).
+User=ychorses
+Group=ychorses
+StateDirectory=yc-hack-horses
+ConfigurationDirectory=yc-hack-horses
+Environment=DATA_DIR=/var/lib/yc-hack-horses
+Environment=LD_LIBRARY_PATH=/usr/lib64/yc-hack-horses
+ExecStart=/usr/bin/yc-hack-horses --config /etc/yc-hack-horses/node.yaml
+Restart=on-failure
+RestartSec=5
+# Порт локального API — 8080; слушаем на loopback по умолчанию
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yc-hack-horses
+
+[Install]
+WantedBy=multi-user.target
