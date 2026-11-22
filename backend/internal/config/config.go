@@ -76,6 +76,23 @@ type Config struct {
 		RuntimeLib   string `yaml:"runtime_lib"`
 		ReIDModelDir string `yaml:"reid_model_dir"`
 	} `yaml:"inference"`
+	// Enrollment — автоматическая выдача клиентских сертификатов
+	// (ADR-0007 amended, ADR-0014). Включается только на central-ноде;
+	// локальные ноды держат выключенным.
+	Enrollment struct {
+		// Enabled — включить POST /api/v1/enroll. false — эндпоинт
+		// отвечает 404 (поведение до внедрения enrollment).
+		Enabled bool `yaml:"enabled"`
+		// Token — enrollment-токен; выдаётся оператором, клиент вводит
+		// его один раз при первом запуске приложения.
+		Token string `yaml:"token"`
+		// CAKeyFile — приватный ключ CA, которым подписываются выдачи
+		// (серт — security.ca_file).
+		CAKeyFile string `yaml:"ca_key_file"`
+		// CertDays — срок жизни выдаваемого серта (0 → 365, ADR-0007
+		// amended: leaf-серты enrollment-нод — 365 дней).
+		CertDays int `yaml:"cert_days"`
+	} `yaml:"enrollment"`
 	// Api — HTTP API ноды.
 	Api struct {
 		// DocsEnabled — Scalar UI (/api/scalar) и OpenAPI-спека. Включается
@@ -104,7 +121,8 @@ func Default() *Config {
 	c.Sync.Interval = 30 * time.Second
 	c.LogLevel = "info"
 	c.Inference.Engine = "unavailable"
-	c.Api.DocsEnabled = false // документация — только у central-ноды
+	c.Api.DocsEnabled = false   // документация — только у central-ноды
+	c.Enrollment.CertDays = 365 // ADR-0007 amended: leaf enrollment-нод — 1 год
 	c.AppVersion = "0.0.1-dev"
 	return c
 }
@@ -157,6 +175,10 @@ func (c *Config) applyEnv() {
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
 	envString("INFER_REID_MODEL_DIR", &c.Inference.ReIDModelDir)
 	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
+	envBool("ENROLLMENT_ENABLED", &c.Enrollment.Enabled)
+	envString("ENROLLMENT_TOKEN", &c.Enrollment.Token)
+	envString("ENROLLMENT_CA_KEY_FILE", &c.Enrollment.CAKeyFile)
+	envInt("ENROLLMENT_CERT_DAYS", &c.Enrollment.CertDays)
 	envString("LOG_LEVEL", &c.LogLevel)
 	envString("APP_VERSION", &c.AppVersion)
 }
@@ -230,6 +252,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Sync.BatchSize <= 0 {
 		return fmt.Errorf("config: sync.batch_size должен быть > 0")
+	}
+	if c.Enrollment.Enabled {
+		if c.Enrollment.Token == "" {
+			return fmt.Errorf("config: enrollment.enabled требует enrollment.token (ENROLLMENT_TOKEN)")
+		}
+		if c.Enrollment.CAKeyFile == "" {
+			return fmt.Errorf("config: enrollment.enabled требует enrollment.ca_key_file (ENROLLMENT_CA_KEY_FILE)")
+		}
+		if c.Security.CAFile == "" {
+			return fmt.Errorf("config: enrollment.enabled требует security.ca_file — CA-серт, которым проверяются выдачи")
+		}
 	}
 	switch c.Inference.Engine {
 	case "unavailable", "reference":

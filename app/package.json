@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "start": "npm run build && electron .",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && tsc -p tsconfig.electron.json && node scripts/electron-cjs.cjs",
     "test": "vitest run",
     "lint": "eslint src",
     "package:mac": "npm run build && electron-builder --mac dir --arm64",
@@ -61,7 +61,8 @@
       "dist/**/*",
       "!dist/photos.zip",
       "!**/.DS_Store",
-      "electron/*.cjs"
+      "electron/*.cjs",
+      "electron/build/**"
     ],
     "mac": {
       "category": "public.app-category.education",

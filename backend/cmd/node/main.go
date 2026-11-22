@@ -27,6 +27,7 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			cmdWeb(),
+			cmdEnroll(),
 			cmdMigrate(),
 		},
 		DefaultCommand: "web",

@@ -7,6 +7,8 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const run = promisify(execFile);
 const startURL = 'journal://app/';
+// Хост локальной ноды (ADR-0014): в пакете спавнит забандленный бинарь и
+// проходит enrollment; в дев-режиме (npm start) no-op — старый поток.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'journal',

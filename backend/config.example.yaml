@@ -31,6 +31,14 @@ sync:
   batch_size: 256
   interval: "30s"
 
+enrollment:
+  # Автоматическая выдача клиентских сертификатов (ADR-0007 amended, ADR-0014).
+  # Включается ТОЛЬКО на central-ноде; локальные ноды держат выключенным.
+  enabled: false
+  token: ""                # enrollment-токен (env ENROLLMENT_TOKEN)
+  ca_key_file: ""          # приватный ключ CA подписи (env ENROLLMENT_CA_KEY_FILE)
+  cert_days: 365           # срок жизни выдаваемого leaf-серта (ADR-0007 amended)
+
 api:
   # Документация REST API (Scalar UI на /api/scalar + openapi.yaml).
   # Включать только на central-ноде (self-service деплой); локальные ноды — false.

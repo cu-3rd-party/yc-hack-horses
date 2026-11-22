@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/enroll"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
@@ -41,6 +42,10 @@ type Deps struct {
 	// BlobStats — срез состояния блобов (referenced/present/missing) для
 	// /api/v1/node; nil, если blob-синхронизация не запущена.
 	BlobStats func() any
+	// Enrollment — сервис выдачи клиентских сертификатов (ADR-0007
+	// amended, ADR-0014). nil — enrollment выключен: POST /api/v1/enroll
+	// отвечает 404. Конфигурируется только на central-ноде.
+	Enrollment *enroll.Service
 	// DocsEnabled — включить Scalar UI (/api/scalar) и OpenAPI-спеку.
 	// Включается только на central-ноде (api.docs_enabled / API_DOCS_ENABLED).
 	DocsEnabled bool
@@ -91,6 +96,8 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/inference/traits", postInferenceTraits(d))
 		v1.Patch("/trait_snapshots/{id}", patchTraitSnapshot(d))
 		v1.Get("/inference/similar", getSimilarTraits(d))
+
+		v1.Post("/enroll", handleEnroll(d))
 
 		v1.Get("/node", nodeInfo(d))
 		v1.Get("/events", streamEvents(d))

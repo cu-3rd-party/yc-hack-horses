@@ -5,5 +5,5 @@ export default defineConfig({
   base: './',
   server: { proxy: { '/api/v1': { target: 'http://127.0.0.1:8080' } } },
   plugins: [react(), tailwindcss()],
-  test: { environment: 'node', include: ['src/**/*.test.ts'] },
+  test: { environment: 'node', include: ['src/**/*.test.ts', 'tests/*.test.ts'] },
 });

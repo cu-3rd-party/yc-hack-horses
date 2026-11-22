@@ -73,3 +73,30 @@ func VerifyPeerNodeID(cert *x509.Certificate, expectedNodeID string) error {
 	}
 	return nil
 }
+
+// NodeIDFromCSR извлекает node_id из URI SAN запроса на сертификат.
+// Формат тот же, что и у сертификата: ровно один URI przewalski://node/<uuid>.
+func NodeIDFromCSR(csr *x509.CertificateRequest) (string, error) {
+	if csr == nil {
+		return "", ErrNoURISAN
+	}
+	for _, u := range csr.URIs {
+		if u.Scheme != UriScheme {
+			continue
+		}
+		var id string
+		switch {
+		case u.Host == "node" && strings.HasPrefix(u.Path, "/"):
+			id = strings.TrimPrefix(u.Path, "/")
+		case u.Opaque != "" && strings.HasPrefix(u.Opaque, "node/"):
+			id = strings.TrimPrefix(u.Opaque, "node/")
+		default:
+			continue
+		}
+		if id == "" {
+			return "", ErrEmptyNodeID
+		}
+		return id, nil
+	}
+	return "", ErrNoURISAN
+}

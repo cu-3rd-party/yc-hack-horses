@@ -54,4 +54,4 @@ with open(archive, 'rb') as f:
 (out/'ort-1.31.1.ready').touch()
 PYTHON
 fi
-GOOS="$target_os" GOARCH="$target_cpu" CGO_ENABLED=1 "$go_bin" build -trimpath -tags netgo,osusergo -o "$out/loshid-node" ./cmd/node
+GOOS="$target_os" GOARCH="$target_cpu" CGO_ENABLED=1 "$go_bin" build -trimpath -tags netgo,osusergo -ldflags="-s -w" -o "$out/loshid-node" ./cmd/node

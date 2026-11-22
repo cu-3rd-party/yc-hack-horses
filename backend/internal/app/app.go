@@ -27,6 +27,7 @@ import (
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/config"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/enroll"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/identity"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/yolo"
@@ -190,6 +191,24 @@ func New(cfg *config.Config) (*App, error) {
 		modelMode = "external"
 		comparisonModel = comparison.ModelEndpoint{URL: cfg.Inference.ComparisonURL}
 	}
+	// Enrollment-сервис (ADR-0014): только при enrollment.enabled —
+	// конфигурация central. Ошибка конфигурации не должна валить ноду
+	// без enrollment: сервис не собирается, эндпоинт остаётся выключен.
+	var enrollSvc *enroll.Service
+	if cfg.Enrollment.Enabled {
+		svc, err := enroll.NewService(enroll.ServerConfig{
+			Token:     cfg.Enrollment.Token,
+			CAFile:    cfg.Security.CAFile,
+			CAKeyFile: cfg.Enrollment.CAKeyFile,
+			CertDays:  cfg.Enrollment.CertDays,
+			DataDir:   cfg.Node.DataDir,
+		})
+		if err != nil {
+			slog.Error("enroll: сервис не запущен", "err", err)
+		} else {
+			enrollSvc = svc
+		}
+	}
 	handler := httpapi.NewRouter(httpapi.Deps{
 		Store:           store,
 		Blobs:           blobs,
@@ -203,6 +222,7 @@ func New(cfg *config.Config) (*App, error) {
 		ComparisonModel: comparisonModel,
 		Models:          assets, ModelMode: modelMode, RuntimePath: cfg.Inference.RuntimeLib,
 		DocsEnabled: cfg.Api.DocsEnabled,
+		Enrollment:  enrollSvc,
 	})
 	srvHandler := http.Handler(handler)
 	if cfg.Network.GRPCMultiplex {
