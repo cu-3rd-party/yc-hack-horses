@@ -103,10 +103,30 @@ func createHorse(d Deps) http.HandlerFunc {
 
 func listHorses(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		horses, err := d.Store.ListHorses(r.Context())
+		q, err := parseListQuery(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid list query parameters")
+			return
+		}
+		if !q.paged {
+			horses, err := d.Store.ListHorses(r.Context())
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if horses == nil {
+				horses = []domain.Horse{}
+			}
+			writeJSON(w, http.StatusOK, horses)
+			return
+		}
+		horses, lastKey, hasMore, err := d.Store.ListHorsesPage(r.Context(), q.keyMs, q.id, q.limit)
 		if err != nil {
 			serverError(w, err)
 			return
+		}
+		if hasMore && len(horses) > 0 {
+			w.Header().Set("X-Next-Cursor", sqlstore.EncodeListCursor(lastKey, horses[len(horses)-1].ID))
 		}
 		if horses == nil {
 			horses = []domain.Horse{}
@@ -146,7 +166,9 @@ func patchHorse(d Deps) http.HandlerFunc {
 		err = appendWithProjection(d, r.Context(), eventHorseUpdated, id,
 			mustJSON(map[string]any{"identity_status": status}),
 			func(tx *sqlstore.Store) error {
-				h, err := tx.UpdateHorse(r.Context(), id, &status, *form.Metadata)
+				// Запись уже прочитана выше (404 до записи события); внутри
+				// транзакции повторный SELECT не нужен.
+				h, err := tx.UpdateHorseFrom(r.Context(), current, &status, *form.Metadata)
 				if err != nil {
 					return err
 				}
@@ -210,33 +232,24 @@ func createObservation(d Deps) http.HandlerFunc {
 			ObserverID: form.ObserverID,
 			BlobIDs:    form.BlobIDs,
 		}
+		var storedObservation domain.Observation
 		err := appendWithProjection(d, r.Context(), domain.EventObservationAdded, o.ID, mustJSON(o),
 			func(tx *sqlstore.Store) error {
-				if err := tx.CreateObservation(r.Context(), o); err != nil {
+				// Вставка + батч-проверка ссылок на блобы одной транзакцией:
+				// один SELECT на все blob_ids вместо запроса на каждую ссылку,
+				// ответ — уже финальная проекция (перечитывание не нужно).
+				stored, err := tx.CreateObservationChecked(r.Context(), o, "blob deleted")
+				if err != nil {
 					return err
 				}
-				// Фото могло быть удалено раньше: наблюдение создаётся, но сразу неактивным.
-				_, err := tx.InvalidateObservationIfBlobsDeleted(r.Context(), o.ID, o.BlobIDs, "blob deleted")
-				return err
+				storedObservation = stored
+				return nil
 			})
 		if err != nil {
 			serverError(w, err)
 			return
 		}
-		// Ответ — из проекции: наблюдение могло быть помечено неактуальным сразу.
-		// Событие к этому моменту уже закоммичено, поэтому молча отдавать stale-
-		// объект нельзя: ErrNotFound — 404, прочие ошибки — 500 с логом.
-		//
-		// Внимание: 500 здесь возможен уже после успешного коммита (событие
-		// записано, а чтение проекции упало). Клиентский ретрай в этом случае
-		// создаст второе наблюдение — смиряемся с этим ради честного кода
-		// ответа вместо выдачи stale-объекта.
-		stored, err := d.Store.GetObservation(r.Context(), o.ID)
-		if err != nil {
-			notFoundOrServerError(w, err, "observation")
-			return
-		}
-		o = stored
+		o = storedObservation
 		w.Header().Set("Location", "/api/v1/observations/"+o.ID)
 		writeJSON(w, http.StatusCreated, o)
 	}
@@ -246,13 +259,48 @@ func listObservations(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		horseID := r.URL.Query().Get("horse_id")
 		include := strings.Split(r.URL.Query().Get("include"), ",")
+		q, err := parseListQuery(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid list query parameters")
+			return
+		}
 		if slices.Contains(include, "photos") || slices.Contains(include, "annotations") {
+			if q.paged {
+				history, lastKey, hasMore, err := d.Store.ObservationHistoryPage(r.Context(), horseID, q.keyMs, q.id, q.limit,
+					slices.Contains(include, "annotations"))
+				if err != nil {
+					serverError(w, err)
+					return
+				}
+				if hasMore && len(history) > 0 {
+					last := history[len(history)-1].Observation
+					w.Header().Set("X-Next-Cursor", sqlstore.EncodeListCursor(lastKey, last.ID))
+				}
+				writeJSON(w, http.StatusOK, history)
+				return
+			}
 			history, err := d.Store.ObservationHistory(r.Context(), horseID, slices.Contains(include, "annotations"))
 			if err != nil {
 				serverError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, history)
+			return
+		}
+		if q.paged {
+			observations, lastKey, hasMore, err := d.Store.ListObservationsPage(r.Context(), horseID, q.keyMs, q.id, q.limit)
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if hasMore && len(observations) > 0 {
+				last := observations[len(observations)-1]
+				w.Header().Set("X-Next-Cursor", sqlstore.EncodeListCursor(lastKey, last.ID))
+			}
+			if observations == nil {
+				observations = []domain.Observation{}
+			}
+			writeJSON(w, http.StatusOK, observations)
 			return
 		}
 		observations, err := d.Store.ListObservations(r.Context(), horseID)
@@ -328,10 +376,30 @@ func registerBlob(ctx context.Context, d Deps, data []byte, mime string) (domain
 
 func listBlobs(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		blobs, err := d.Store.ListBlobs(r.Context())
+		q, err := parseListQuery(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid list query parameters")
+			return
+		}
+		if !q.paged {
+			blobs, err := d.Store.ListBlobs(r.Context())
+			if err != nil {
+				serverError(w, err)
+				return
+			}
+			if blobs == nil {
+				blobs = []domain.Blob{}
+			}
+			writeJSON(w, http.StatusOK, blobs)
+			return
+		}
+		blobs, lastKey, hasMore, err := d.Store.ListBlobsPage(r.Context(), q.keyMs, q.id, q.limit)
 		if err != nil {
 			serverError(w, err)
 			return
+		}
+		if hasMore && len(blobs) > 0 {
+			w.Header().Set("X-Next-Cursor", sqlstore.EncodeListCursor(lastKey, blobs[len(blobs)-1].SHA256))
 		}
 		if blobs == nil {
 			blobs = []domain.Blob{}

@@ -123,13 +123,11 @@ func patchTraitSnapshot(d Deps) http.HandlerFunc {
 			Confidence:  1.0, // подтверждено человеком
 			Fingerprint: inference.Fingerprint(form.Traits),
 		}
-		if err := d.Store.ConfirmTraitSnapshot(r.Context(), updated); err != nil {
-			notFoundOrServerError(w, err, "trait snapshot")
-			return
-		}
-		saved, err := d.Store.GetTraitSnapshot(r.Context(), id)
+		// UPDATE ... RETURNING: подтверждение и обновлённая строка одним
+		// запросом, перечитывание не нужно.
+		saved, err := d.Store.ConfirmTraitSnapshot(r.Context(), updated)
 		if err != nil {
-			serverError(w, err)
+			notFoundOrServerError(w, err, "trait snapshot")
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)

@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
-	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -115,13 +116,27 @@ func (s *Store) SetLegacyCapture(ctx context.Context, sha, capture string) error
 }
 
 func (s *Store) ObservationHistory(ctx context.Context, horseID string, annotations bool) ([]comparison.History, error) {
-	observations, err := s.listObservations(ctx, horseID, false)
+	out, _, _, err := s.ObservationHistoryPage(ctx, horseID, 0, "", 0, annotations)
+	return out, err
+}
+
+// ObservationHistoryPage — история с пагинацией по (observed_at, id):
+// keyMs/id — курсор последней отданной записи (0 — начало), limit <= 0 — без
+// ограничения. Возвращает ключ курсора последней записи и hasMore.
+func (s *Store) ObservationHistoryPage(ctx context.Context, horseID string, keyMs int64, id string, limit int, annotations bool) ([]comparison.History, int64, bool, error) {
+	observations, lastKey, hasMore, err := s.ListObservationsPage(ctx, horseID, keyMs, id, limit)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
 	}
 	photoGroups, err := s.historyPhotos(ctx, horseID, annotations)
 	if err != nil {
-		return nil, err
+		return nil, 0, false, err
+	}
+	// Резолв blob_id -> sha256 одним батч-запросом вместо GetBlobByID на
+	// каждую не-sha ссылку (N+1 на наблюдение с фото).
+	shaByID, err := s.blobSHAByIDs(ctx, observations)
+	if err != nil {
+		return nil, 0, false, err
 	}
 	out := make([]comparison.History, len(observations))
 	for i, o := range observations {
@@ -131,20 +146,64 @@ func (s *Store) ObservationHistory(ctx context.Context, horseID string, annotati
 			for index, blob := range o.BlobIDs {
 				sha := blob
 				if len(blob) != 64 {
-					meta, err := s.GetBlobByID(ctx, blob)
-					if errors.Is(err, storage.ErrNotFound) {
-						continue
+					resolved, ok := shaByID[strings.ToLower(blob)]
+					if !ok {
+						continue // блоба нет — фото из истории выпадает (как раньше при ErrNotFound)
 					}
-					if err != nil {
-						return nil, err
-					}
-					sha = meta.SHA256
+					sha = resolved
 				}
 				id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(o.ID+"/"+strconv.Itoa(index))).String()
 				photos = append(photos, comparison.Photo{ID: id, SHA: sha})
 			}
 		}
 		out[i] = comparison.History{Observation: o, Photos: photos}
+	}
+	return out, lastKey, hasMore, nil
+}
+
+// blobSHAByIDs — один батч-SELECT по всем не-sha ссылкам (blobs.id) из
+// наблюдений страницы. Чанки по 500 ссылок, чтобы не упираться в лимит
+// плейсхолдеров; сравнение по LOWER — идентификаторы могли быть в любом регистре.
+func (s *Store) blobSHAByIDs(ctx context.Context, observations []domain.Observation) (map[string]string, error) {
+	var ids []string
+	seen := map[string]struct{}{}
+	for _, o := range observations {
+		for _, blob := range o.BlobIDs {
+			if len(blob) == 64 {
+				continue
+			}
+			key := strings.ToLower(blob)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			ids = append(ids, blob)
+		}
+	}
+	out := map[string]string{}
+	for start := 0; start < len(ids); start += 500 {
+		end := min(start+500, len(ids))
+		chunk := ids[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("LOWER(?),", len(chunk)), ",")
+		rows, err := s.query(ctx,
+			`SELECT LOWER(id), LOWER(sha256) FROM blobs WHERE deleted_at = 0 AND LOWER(id) IN (`+placeholders+`)`,
+			toLowerArgs(chunk)...)
+		if err != nil {
+			return nil, fmt.Errorf("sqlstore: blob sha by ids: %w", err)
+		}
+		for rows.Next() {
+			var id, sha string
+			if err := rows.Scan(&id, &sha); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("sqlstore: blob sha by ids: %w", err)
+			}
+			out[id] = sha
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("sqlstore: blob sha by ids: %w", err)
+		}
+		rows.Close()
 	}
 	return out, nil
 }

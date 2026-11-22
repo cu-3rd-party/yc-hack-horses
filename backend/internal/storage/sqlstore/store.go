@@ -11,10 +11,11 @@ import (
 // Store — SQL-хранилище. Реализует storage.EventStore; операции проекций в projections.go.
 // RunInTx даёт транзакционность между журналом событий и проекциями.
 type Store struct {
-	db     *sql.DB
-	tx     *sql.Tx // не nil внутри RunInTx
-	rebind func(query string) string
-	driver string
+	db      *sql.DB
+	tx      *sql.Tx // не nil внутри RunInTx
+	rebind  func(query string) string
+	driver  string
+	summary *summaryCache // общий кэш сводки; nil — кэш выключен
 }
 
 // Open открывает пул соединений. driver: "sqlite" | "postgres". Миграции отдельно (package migrate).
@@ -50,7 +51,7 @@ func Open(driver, dsn string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("sqlstore: ping %s: %w", driver, err)
 	}
-	s := &Store{db: db, driver: driver, rebind: bindSQLite}
+	s := &Store{db: db, driver: driver, rebind: bindSQLite, summary: &summaryCache{}}
 	if driver == "postgres" {
 		s.rebind = bindPostgres
 	}
@@ -87,7 +88,7 @@ func (s *Store) RunInTx(ctx context.Context, fn func(tx *Store) error) error {
 	if err != nil {
 		return fmt.Errorf("sqlstore: begin tx: %w", err)
 	}
-	inner := &Store{db: s.db, tx: tx, driver: s.driver, rebind: s.rebind}
+	inner := &Store{db: s.db, tx: tx, driver: s.driver, rebind: s.rebind, summary: s.summary}
 	if err := fn(inner); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -95,6 +96,11 @@ func (s *Store) RunInTx(ctx context.Context, fn func(tx *Store) error) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlstore: commit: %w", err)
 	}
+	// Инвалидация кэша сводки ПОСЛЕ коммита: Append инвалидирует внутри tx,
+	// но читатель между инвалидацией и COMMIT мог снять снапшот и закэшировать
+	// пред-коммитное значение как свежее. Повторная инвалидация после коммита
+	// отбрасывает и такие снапшоты (seq разошлись).
+	inner.invalidateSummary()
 	return nil
 }
 

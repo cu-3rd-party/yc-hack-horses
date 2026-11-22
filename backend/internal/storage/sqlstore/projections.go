@@ -87,6 +87,14 @@ func (s *Store) UpdateHorse(ctx context.Context, id string, status *string, meta
 	if err != nil {
 		return domain.Horse{}, err
 	}
+	return s.UpdateHorseFrom(ctx, h, status, metadata)
+}
+
+// UpdateHorseFrom — как UpdateHorse, но запись уже прочитана вызывающим:
+// повторный SELECT внутри транзакции не нужен (см. patchHorse / putHorsePassport).
+func (s *Store) UpdateHorseFrom(ctx context.Context, current domain.Horse, status *string, metadata map[string]string) (domain.Horse, error) {
+	id := current.ID
+	h := current
 	if status != nil {
 		h.IdentityStatus = *status
 	}
@@ -205,6 +213,161 @@ func (s *Store) listObservations(ctx context.Context, horseID string, limited bo
 		out = append(out, o)
 	}
 	return out, rows.Err()
+}
+
+// --- пагинация списков ---
+// Курсорная пагинация по ключу сортировки (unix-ms, id): /horses — created_at,
+// /observations — observed_at, /blobs — created_at. Все методы забирают limit+1
+// строку, чтобы вызывающий узнал о продолжении без лишнего запроса.
+// Курсор непрозрачный для клиента (см. encodeListCursor в helpers.go).
+
+// ListHorsesPage — страница лошадей после (keyMs, id) в порядке (created_at, id).
+// limit <= 0 — без ограничения (полный список, совместимо с ListHorses).
+// lastKeyMs — ключ сортировки последней отданной записи (для next-cursor).
+func (s *Store) ListHorsesPage(ctx context.Context, keyMs int64, id string, limit int) ([]domain.Horse, int64, bool, error) {
+	q := `SELECT id, created_at, identity_status, metadata FROM horses`
+	cond, args := appendCursorCond("created_at", "id", keyMs, id)
+	if cond != "" {
+		q += " WHERE"
+	}
+	q += cond + ` ORDER BY created_at, id`
+	if limit > 0 {
+		// limit+1 строка — как в ListObservationsPage/ListBlobsPage: по ней
+		// узнаём о продолжении, лишний запрос не нужен.
+		q += fmt.Sprintf(" LIMIT %d", limit+1)
+	}
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list horses: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Horse
+	for rows.Next() {
+		var (
+			h         domain.Horse
+			createdAt int64
+			metadata  string
+		)
+		if err := rows.Scan(&h.ID, &createdAt, &h.IdentityStatus, &metadata); err != nil {
+			return nil, 0, false, fmt.Errorf("sqlstore: scan horse: %w", err)
+		}
+		h.CreatedAt = timeFromUnixMilli(createdAt)
+		h.Metadata = map[string]string{}
+		_ = json.Unmarshal([]byte(metadata), &h.Metadata)
+		out = append(out, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list horses: %w", err)
+	}
+	if limit > 0 && len(out) > limit {
+		lastKey := out[limit-1].CreatedAt.UnixMilli()
+		return out[:limit], lastKey, true, nil
+	}
+	if limit > 0 && len(out) > 0 {
+		return out, out[len(out)-1].CreatedAt.UnixMilli(), false, nil
+	}
+	return out, 0, false, nil
+}
+
+// ListObservationsPage — страница наблюдений после (keyMs, id) в порядке
+// (observed_at, id); horseID != "" фильтрует по лошади. limit <= 0 — без лимита.
+func (s *Store) ListObservationsPage(ctx context.Context, horseID string, keyMs int64, id string, limit int) ([]domain.Observation, int64, bool, error) {
+	q := `SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name, comment,
+	             invalidated_at, invalidation_reason
+	     FROM observations`
+	var args []any
+	conds := []string{}
+	if horseID != "" {
+		conds = append(conds, "horse_id = ?")
+		args = append(args, horseID)
+	}
+	cond, cursorArgs := appendCursorCond("observed_at", "id", keyMs, id)
+	if cond != "" {
+		conds = append(conds, strings.TrimPrefix(cond, " "))
+		args = append(args, cursorArgs...)
+	}
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += ` ORDER BY observed_at, id`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit+1)
+	}
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list observations: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Observation
+	for rows.Next() {
+		var (
+			o             domain.Observation
+			observedAt    int64
+			blobIDs       string
+			invalidatedAt int64
+		)
+		if err := rows.Scan(&o.ID, &o.HorseID, &o.NodeID, &observedAt, &o.Location, &o.ObserverID, &blobIDs, &o.TraitSnapID, &o.Name, &o.Comment,
+			&invalidatedAt, &o.InvalidationReason); err != nil {
+			return nil, 0, false, fmt.Errorf("sqlstore: scan observation: %w", err)
+		}
+		o.ObservedAt = timeFromUnixMilli(observedAt)
+		o.BlobIDs = []string{}
+		_ = json.Unmarshal([]byte(blobIDs), &o.BlobIDs)
+		setInvalidation(&o, invalidatedAt)
+		out = append(out, o)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list observations: %w", err)
+	}
+	if limit > 0 && len(out) > limit {
+		lastKey := out[limit-1].ObservedAt.UnixMilli()
+		return out[:limit], lastKey, true, nil
+	}
+	if limit > 0 && len(out) > 0 {
+		return out, out[len(out)-1].ObservedAt.UnixMilli(), false, nil
+	}
+	return out, 0, false, nil
+}
+
+// ListBlobsPage — страница блобов после (keyMs, id) в порядке (created_at, sha256).
+// limit <= 0 — без лимита.
+func (s *Store) ListBlobsPage(ctx context.Context, keyMs int64, id string, limit int) ([]domain.Blob, int64, bool, error) {
+	q := `SELECT id, sha256, mime_type, size, created_at FROM blobs WHERE deleted_at = 0`
+	cond, args := appendCursorCond("created_at", "sha256", keyMs, id)
+	if cond != "" {
+		q += " AND"
+	}
+	q += cond + ` ORDER BY created_at, sha256`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit+1)
+	}
+	rows, err := s.query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list blobs: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.Blob
+	var keys []int64
+	for rows.Next() {
+		var b domain.Blob
+		var createdAt int64
+		if err := rows.Scan(&b.ID, &b.SHA256, &b.MimeType, &b.Size, &createdAt); err != nil {
+			return nil, 0, false, fmt.Errorf("sqlstore: scan blob: %w", err)
+		}
+		out = append(out, b)
+		keys = append(keys, createdAt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, false, fmt.Errorf("sqlstore: list blobs: %w", err)
+	}
+	// Ключ курсора — created_at последней отданной строки.
+	if limit > 0 && len(out) > limit {
+		return out[:limit], keys[limit-1], true, nil
+	}
+	if limit > 0 && len(out) > 0 {
+		return out, keys[len(out)-1], false, nil
+	}
+	return out, 0, false, nil
 }
 
 // ListReferencedBlobHashes возвращает уникальные blob_ids из всех наблюдений и
@@ -578,23 +741,110 @@ func (s *Store) InvalidateObservation(ctx context.Context, id string, invalidate
 	return n, nil
 }
 
+// blobDeletionsFor — батч-проверка ссылок наблюдения: один SELECT возвращает
+// все мягко удалённые блобы, на которые ссылаются refs (по blobs.id или legacy
+// sha256). Результат — lower(ссылка) -> (канонический sha256, метка удаления).
+func (s *Store) blobDeletionsFor(ctx context.Context, refs []string) (map[string]blobDeletionInfo, error) {
+	out := map[string]blobDeletionInfo{}
+	for start := 0; start < len(refs); start += 500 {
+		end := min(start+500, len(refs))
+		chunk := refs[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("LOWER(?),", len(chunk)), ",")
+		rows, err := s.query(ctx,
+			`SELECT LOWER(id), LOWER(sha256), deleted_at FROM blobs
+			 WHERE deleted_at != 0 AND (LOWER(id) IN (`+placeholders+`) OR LOWER(sha256) IN (`+placeholders+`))`,
+			append(toLowerArgs(chunk), toLowerArgs(chunk)...)...)
+		if err != nil {
+			return nil, fmt.Errorf("sqlstore: blob deletions: %w", err)
+		}
+		for rows.Next() {
+			var (
+				id, sha   string
+				deletedAt int64
+			)
+			if err := rows.Scan(&id, &sha, &deletedAt); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("sqlstore: blob deletions: %w", err)
+			}
+			// Одна ссылка может совпасть и по id, и по sha256: берём позднейшую метку.
+			for _, key := range []string{id, sha} {
+				if prev, ok := out[key]; ok && prev.deletedAtMs >= deletedAt {
+					continue
+				}
+				out[key] = blobDeletionInfo{sha256: sha, deletedAtMs: deletedAt}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("sqlstore: blob deletions: %w", err)
+		}
+		rows.Close()
+	}
+	return out, nil
+}
+
+type blobDeletionInfo struct {
+	sha256      string
+	deletedAtMs int64
+}
+
+// CreateObservationChecked — вставка наблюдения и проверка его ссылок на блобы
+// одной транзакцией вызывающего: один батч-SELECT вместо запроса на каждую
+// ссылку. Возвращает финальную проекцию наблюдения (с флагами инвалидации),
+// чтобы HTTP-хендлеру не нужно было перечитывать строку после коммита.
+func (s *Store) CreateObservationChecked(ctx context.Context, o domain.Observation, reason string) (domain.Observation, error) {
+	if err := s.CreateObservation(ctx, o); err != nil {
+		return o, err
+	}
+	if len(o.BlobIDs) == 0 {
+		return o, nil
+	}
+	deletions, err := s.blobDeletionsFor(ctx, o.BlobIDs)
+	if err != nil {
+		return o, err
+	}
+	for _, ref := range o.BlobIDs {
+		d, ok := deletions[strings.ToLower(ref)]
+		if !ok {
+			continue
+		}
+		// В причине — канонический sha256: по ссылке blobs.id не видно, какое фото выпало.
+		sha := d.sha256
+		if sha == "" {
+			sha = ref
+		}
+		deletedAt := timeFromUnixMilli(d.deletedAtMs)
+		if _, err := s.InvalidateObservation(ctx, o.ID, deletedAt, InvalidationReason(sha, reason)); err != nil {
+			return o, err
+		}
+		o.Invalidated, o.InvalidatedAt, o.InvalidationReason = true, &deletedAt, InvalidationReason(sha, reason)
+		return o, nil
+	}
+	return o, nil
+}
+
 // InvalidateObservationIfBlobsDeleted помечает наблюдение неактуальным, если
 // хоть одна ссылка (blob id или sha256) уже мягко удалена. Нужна, когда
 // наблюдение создаётся после удаления фото: события в журнале уже разошлись.
 func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observationID string, refs []string, reason string) (bool, error) {
+	if len(refs) == 0 {
+		return false, nil
+	}
+	deletions, err := s.blobDeletionsFor(ctx, refs)
+	if err != nil {
+		return false, err
+	}
 	for _, ref := range refs {
-		sha, deletedAt, deleted, err := s.blobDeletion(ctx, ref)
-		if err != nil {
-			return false, err
-		}
-		if !deleted {
+		d, ok := deletions[strings.ToLower(ref)]
+		if !ok {
 			continue
 		}
 		// В причине — канонический sha256: по ссылке blobs.id не видно, какое фото выпало.
+		sha := d.sha256
 		if sha == "" {
 			sha = ref
 		}
-		if _, err := s.InvalidateObservation(ctx, observationID, deletedAt, InvalidationReason(sha, reason)); err != nil {
+		if _, err := s.InvalidateObservation(ctx, observationID, timeFromUnixMilli(d.deletedAtMs), InvalidationReason(sha, reason)); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -614,7 +864,8 @@ func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observa
 // отдельная таблица ссылок blob->observation с индексом) придёт с ядром и
 // интеграционным слоем — здесь метод не переписываем, только фиксируем цену
 // и что каждый вызов из PruneBlobs стоит этих сканов (их два на блоб).
-// Проверка паспорта добавляет проход по horses (лошадей сотни, это дёшево).
+// Проверка паспорта — точечный COUNT по metadata LIKE, без чтения всех лошадей.
+// Для групповой проверки рипером есть BlobReferencedBatch ниже.
 func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
 	patterns, err := s.blobRefPatterns(ctx, sha)
 	if err != nil {
@@ -638,17 +889,205 @@ func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
 	if n > 0 {
 		return true, nil
 	}
-	// Файл прикреплённого PDF-паспорта не удаляем с диска.
-	horses, err := s.ListHorses(ctx)
-	if err != nil {
+	// Файл прикреплённого PDF-паспорта не удаляем с диска. Точечный EXISTS по
+	// metadata LIKE вместо полного ListHorses: паспортов ищем по точному
+	// значению в JSON, полный список лошадей читать не нужно. Два шаблона —
+	// sqlite-текст без пробела и postgres-jsonb с пробелом после двоеточия.
+	passportConds, passportArgs := passportMetadataConds([]string{sha})
+	var passportCount int64
+	if err := s.queryRow(ctx, `SELECT COUNT(*) FROM horses WHERE `+passportConds, passportArgs...).Scan(&passportCount); err != nil {
 		return false, fmt.Errorf("sqlstore: blob %s passport references: %w", sha, err)
 	}
-	for _, h := range horses {
-		if strings.EqualFold(h.Metadata[domain.MetaPassportSHA256], sha) {
-			return true, nil
+	return passportCount > 0, nil
+}
+
+// passportMetadataConds — условия «в metadata есть ключ passport_sha256 с данным
+// значением» для одного или нескольких sha256. Первый вариант — json.Marshal
+// (sqlite, TEXT, без пробела после двоеточия), второй — вывод jsonb::text
+// (postgres, пробел после двоеточия). Регистронезависимо: sha256 в metadata мог
+// быть записан в верхнем регистре.
+func passportMetadataConds(shas []string) (string, []any) {
+	var conds []string
+	var args []any
+	for _, sha := range shas {
+		for _, sp := range []string{"", " "} {
+			conds = append(conds, "LOWER(CAST(metadata AS TEXT)) LIKE ?")
+			args = append(args, `%"passport_sha256":`+sp+`"`+strings.ToLower(sha)+`"%`)
 		}
 	}
-	return false, nil
+	return strings.Join(conds, " OR "), args
+}
+
+// BlobReferencedBatch — пакетная версия BlobReferenced для рипера: на группу
+// блобов три запроса вместо трёх сканов на каждый блоб.
+//  1. observations: один проход по blob_ids, разбор JSON и поиск в множестве Go
+//     (LIKE не умеет атрибутировать совпадение конкретному sha, поэтому
+//     сравнение идёт по точному элементу массива после разбора).
+//  2. observation_photos: DISTINCT по LOWER(sha256) IN (...).
+//  3. horses: один LIKE-запрос по metadata для всех sha сразу.
+func (s *Store) BlobReferencedBatch(ctx context.Context, shas []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(shas))
+	if len(shas) == 0 {
+		return out, nil
+	}
+	for _, sha := range shas {
+		out[strings.ToLower(sha)] = false
+	}
+	// id блобов для каждого sha (blob_ids ссылается на blobs.id или legacy
+	// sha256). Без фильтра deleted_at: блоб с наблюдениями мог быть мягко
+	// удалён, ссылка из blob_ids при этом остаётся (см. historyPhotos).
+	idRows, err := s.query(ctx,
+		`SELECT id, sha256 FROM blobs WHERE LOWER(sha256) IN (`+strings.TrimSuffix(strings.Repeat("LOWER(?),", len(shas)), ",")+`)`,
+		toLowerArgs(shas)...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+	// lower(id) -> sha256, в который группируем ссылки.
+	byID := map[string]string{}
+	shaSet := map[string]struct{}{}
+	for _, sha := range shas {
+		shaSet[strings.ToLower(sha)] = struct{}{}
+	}
+	defer idRows.Close()
+	for idRows.Next() {
+		var id, sha string
+		if err := idRows.Scan(&id, &sha); err != nil {
+			return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+		}
+		if _, ok := shaSet[strings.ToLower(sha)]; ok {
+			byID[strings.ToLower(id)] = strings.ToLower(sha)
+		}
+	}
+	if err := idRows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+
+	// 1) observations: полный проход по blob_ids один раз на группу.
+	obsRows, err := s.query(ctx, `SELECT blob_ids FROM observations WHERE blob_ids != '[]'`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+	defer obsRows.Close()
+	for obsRows.Next() {
+		var raw string
+		if err := obsRows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+		}
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+			return nil, fmt.Errorf("sqlstore: blob references batch: parse blob_ids: %w", err)
+		}
+		for _, id := range ids {
+			if sha, ok := byID[strings.ToLower(id)]; ok {
+				out[sha] = true
+			}
+			// legacy: в массиве записан сам sha256
+			if _, ok := shaSet[strings.ToLower(id)]; ok {
+				out[strings.ToLower(id)] = true
+			}
+		}
+	}
+	if err := obsRows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+
+	// 2) observation_photos — одним запросом на группу.
+	photos, err := s.query(ctx,
+		`SELECT DISTINCT LOWER(sha256) FROM observation_photos WHERE LOWER(sha256) IN (`+strings.TrimSuffix(strings.Repeat("LOWER(?),", len(shas)), ",")+`)`,
+		toLowerArgs(shas)...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+	defer photos.Close()
+	for photos.Next() {
+		var sha string
+		if err := photos.Scan(&sha); err != nil {
+			return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+		}
+		out[sha] = true
+	}
+	if err := photos.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+
+	// 3) паспорта лошадей — один LIKE-запрос на группу.
+	conds, args := passportMetadataConds(shas)
+	horseRows, err := s.query(ctx, `SELECT metadata FROM horses WHERE `+conds, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+	defer horseRows.Close()
+	for horseRows.Next() {
+		var metadata string
+		if err := horseRows.Scan(&metadata); err != nil {
+			return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+		}
+		var m map[string]string
+		if err := json.Unmarshal([]byte(metadata), &m); err != nil {
+			continue
+		}
+		if _, ok := shaSet[strings.ToLower(m[domain.MetaPassportSHA256])]; ok {
+			out[strings.ToLower(m[domain.MetaPassportSHA256])] = true
+		}
+	}
+	if err := horseRows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlstore: blob references batch: %w", err)
+	}
+	return out, nil
+}
+
+// toLowerArgs приводит аргументы к нижнему регистру для IN-сравнений с LOWER.
+func toLowerArgs(shas []string) []any {
+	args := make([]any, len(shas))
+	for i, sha := range shas {
+		args[i] = strings.ToLower(sha)
+	}
+	return args
+}
+
+// BlobsDeleted — пакетная проверка «ссылка помечена мягко удалённой» для рипера:
+// один SELECT на группу вместо полного скана blobs на каждую ссылку.
+// Регистр сравнения — LOWER с обеих сторон (единый подход пакета).
+func (s *Store) BlobsDeleted(ctx context.Context, shas []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, sha := range shas {
+		out[strings.ToLower(sha)] = false
+	}
+	for start := 0; start < len(shas); start += 500 {
+		end := min(start+500, len(shas))
+		chunk := shas[start:end]
+		placeholders := strings.TrimSuffix(strings.Repeat("LOWER(?),", len(chunk)), ",")
+		rows, err := s.query(ctx,
+			`SELECT LOWER(id), LOWER(sha256), deleted_at FROM blobs
+			 WHERE LOWER(id) IN (`+placeholders+`) OR LOWER(sha256) IN (`+placeholders+`)`,
+			append(toLowerArgs(chunk), toLowerArgs(chunk)...)...)
+		if err != nil {
+			return nil, fmt.Errorf("sqlstore: blobs deleted: %w", err)
+		}
+		for rows.Next() {
+			var (
+				id, sha   string
+				deletedAt int64
+			)
+			if err := rows.Scan(&id, &sha, &deletedAt); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("sqlstore: blobs deleted: %w", err)
+			}
+			deleted := deletedAt != 0
+			for _, key := range []string{id, sha} {
+				if prev, ok := out[key]; ok && prev && !deleted {
+					continue
+				}
+				out[key] = deleted
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("sqlstore: blobs deleted: %w", err)
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 // ListBlobs возвращает зарегистрированные блобы, кроме мягко удалённых.
@@ -709,10 +1148,20 @@ func timeNow() time.Time { return time.Now().UTC() }
 
 // eventCount возвращает число событий в журнале.
 func (s *Store) eventCount(ctx context.Context) (int64, error) {
+	var before uint64
+	if s.summary != nil {
+		if n, ok := s.summary.freshCount(); ok {
+			return n, nil
+		}
+		before = s.summary.invalidationSeq()
+	}
 	row := s.queryRow(ctx, `SELECT COUNT(*) FROM events`)
 	var n int64
 	if err := row.Scan(&n); err != nil {
 		return 0, fmt.Errorf("sqlstore: event count: %w", err)
+	}
+	if s.summary != nil {
+		s.summary.fillCount(before, n)
 	}
 	return n, nil
 }

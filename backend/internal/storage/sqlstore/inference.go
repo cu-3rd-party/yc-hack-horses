@@ -44,22 +44,34 @@ func (s *Store) GetTraitSnapshot(ctx context.Context, id string) (domain.TraitSn
 // исходное предсказание: при первом подтверждении raw_predicted_traits получает
 // текущее (модельное) значение traits, при повторных правках — сохраняется.
 // traits перезаписываются отредактированными значениями, edited = 1.
-func (s *Store) ConfirmTraitSnapshot(ctx context.Context, ts domain.TraitSnapshot) error {
-	res, err := s.exec(ctx,
+// UPDATE ... RETURNING возвращает обновлённую строку — второе чтение не нужно;
+// RETURNING поддерживают и postgres, и sqlite (modernc, SQLite >= 3.35),
+// поддержка проверена тестом TestConfirmTraitSnapshotReturning.
+func (s *Store) ConfirmTraitSnapshot(ctx context.Context, ts domain.TraitSnapshot) (domain.TraitSnapshot, error) {
+	rows, err := s.query(ctx,
 		`UPDATE trait_snapshots
 		 SET traits = ?, confidence = ?, fingerprint = ?,
 		     raw_predicted_traits = CASE WHEN confirmed = 0 THEN traits ELSE raw_predicted_traits END,
 		     confirmed = 1, edited = 1
-		 WHERE id = ?`,
+		 WHERE id = ?
+		 RETURNING id, observation_id, model_version, traits, raw_predicted_traits, confidence, fingerprint, confirmed, edited`,
 		string(ts.Traits), ts.Confidence, ts.Fingerprint, ts.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("sqlstore: confirm trait snapshot %s: %w", ts.ID, err)
+		return domain.TraitSnapshot{}, fmt.Errorf("sqlstore: confirm trait snapshot %s: %w", ts.ID, err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return storage.ErrNotFound
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return domain.TraitSnapshot{}, fmt.Errorf("sqlstore: confirm trait snapshot %s: %w", ts.ID, err)
+		}
+		return domain.TraitSnapshot{}, storage.ErrNotFound
 	}
-	return nil
+	saved, err := scanTraitSnapshotRow(rows)
+	if err != nil {
+		return domain.TraitSnapshot{}, fmt.Errorf("sqlstore: confirm trait snapshot %s: %w", ts.ID, err)
+	}
+	return saved, nil
 }
 
 // ListSimilarTraitSnapshots — поиск похожих снимков по fingerprint (sha256

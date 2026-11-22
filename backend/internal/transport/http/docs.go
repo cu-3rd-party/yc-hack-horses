@@ -223,7 +223,12 @@ func buildOpenAPISpec() []byte {
 	}
 
 	// --- horses ---
-	listHorses := add("/api/v1/horses", "get", "Список лошадей", "listHorses", "horses", "")
+	listHorses := add("/api/v1/horses", "get", "Список лошадей", "listHorses", "horses",
+		"Без limit/cursor — весь список. С пагинацией — усечённый список; продолжение помечается заголовком X-Next-Cursor (непрозрачный курсор).")
+	listHorses.Parameters = []parameter{
+		{Name: "limit", In: "query", Schema: strSchema("Размер страницы, по умолчанию 1000, максимум 5000; задаёт курсорную пагинацию.")},
+		{Name: "cursor", In: "query", Schema: strSchema("Курсор продолжения из X-Next-Cursor предыдущей страницы.")},
+	}
 	listHorses.Responses = map[string]resp{"200": okJSON(schemaNode{"type": "array", "items": schemaNode{"$ref": "#/components/schemas/Horse"}})}
 
 	createHorse := add("/api/v1/horses", "post", "Создать лошадь", "createHorse", "horses",
@@ -317,6 +322,8 @@ func buildOpenAPISpec() []byte {
 	listObs.Parameters = []parameter{
 		{Name: "horse_id", In: "query", Schema: strSchema("UUID лошади, пусто — все")},
 		{Name: "include", In: "query", Schema: strSchema("photos,annotations — добавить фотографии и их разметку")},
+		{Name: "limit", In: "query", Schema: strSchema("Размер страницы, по умолчанию 1000, максимум 5000; задаёт курсорную пагинацию (сортировка observed_at, id). Без limit/cursor — историческое поведение: LIMIT 1000.")},
+		{Name: "cursor", In: "query", Schema: strSchema("Курсор продолжения из X-Next-Cursor предыдущей страницы.")},
 	}
 	listObs.Responses = map[string]resp{
 		"200": okJSON(schemaNode{"type": "array", "items": schemaNode{"$ref": "#/components/schemas/Observation"}}),
@@ -344,7 +351,12 @@ func buildOpenAPISpec() []byte {
 	}
 
 	// --- blobs ---
-	listBlobs := add("/api/v1/blobs", "get", "Список блобов", "listBlobs", "blobs", "")
+	listBlobs := add("/api/v1/blobs", "get", "Список блобов", "listBlobs", "blobs",
+		"Без limit/cursor — весь список. С пагинацией (сортировка created_at, sha256) продолжение помечается заголовком X-Next-Cursor.")
+	listBlobs.Parameters = []parameter{
+		{Name: "limit", In: "query", Schema: strSchema("Размер страницы, по умолчанию 1000, максимум 5000; задаёт курсорную пагинацию.")},
+		{Name: "cursor", In: "query", Schema: strSchema("Курсор продолжения из X-Next-Cursor предыдущей страницы.")},
+	}
 	listBlobs.Responses = map[string]resp{
 		"200": okJSON(schemaNode{"type": "array", "items": schemaNode{"$ref": "#/components/schemas/Blob"}}),
 	}

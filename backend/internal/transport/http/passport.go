@@ -28,7 +28,8 @@ var pdfMagic = []byte("%PDF-")
 func putHorsePassport(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		if _, err := d.Store.GetHorse(r.Context(), id); err != nil {
+		current, err := d.Store.GetHorse(r.Context(), id)
+		if err != nil {
 			notFoundOrServerError(w, err, "horse")
 			return
 		}
@@ -84,7 +85,8 @@ func putHorsePassport(d Deps) http.HandlerFunc {
 		var horse domain.Horse
 		err = appendWithProjection(d, r.Context(), domain.EventHorsePassportAttached, id, mustJSON(passport),
 			func(tx *sqlstore.Store) error {
-				h, err := tx.UpdateHorse(r.Context(), id, nil, passport.Metadata())
+				// Лошадь уже прочитана в начале запроса — второй SELECT не нужен.
+				h, err := tx.UpdateHorseFrom(r.Context(), current, nil, passport.Metadata())
 				horse = h
 				return err
 			})

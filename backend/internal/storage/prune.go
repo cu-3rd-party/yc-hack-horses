@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -72,6 +73,22 @@ func PruneBlobs(ctx context.Context, refs BlobReferencer, blobs BlobStore, shas 
 	// удаляется, пока строка снова не станет активной (ре-аплоад).
 	if checker, ok := refs.(BlobDeletionChecker); ok {
 		refs = revivedGuard{refs: refs, checker: checker}
+	}
+	// Первый проход группируем: одна пакетная проверка ссылок (и удалённости)
+	// на группу блобов вместо двух сканов на каждый блоб. Отсевшие кандидаты
+	// (редкие) проходят полный двухпроходный путь ниже; это безопасно, потому
+	// что пакетный ответ консервативен: «ссылается» с любым сомнением.
+	if batcher, ok := refs.(interface {
+		BlobReferencedBatch(ctx context.Context, shas []string) (map[string]bool, error)
+	}); ok && len(shas) > 1 {
+		if deleter, ok := refs.(interface {
+			BlobsDeleted(ctx context.Context, shas []string) (map[string]bool, error)
+		}); ok {
+			shas = batchFirstPass(ctx, batcher, deleter, refs, shas, log)
+			if len(shas) == 0 {
+				return
+			}
+		}
 	}
 	for _, sha := range shas {
 		if !ValidSha256Hex(sha) {
@@ -180,6 +197,37 @@ func (g revivedGuard) MarkBlobPruned(ctx context.Context, sha string, prunedAt t
 	return marker.MarkBlobPruned(ctx, sha, prunedAt)
 }
 
+// BlobReferencedBatch пробрасывает пакетную проверку ссылок во внутреннюю
+// реализацию (revivedGuard сам по себе ссылки не считает).
+func (g revivedGuard) BlobReferencedBatch(ctx context.Context, shas []string) (map[string]bool, error) {
+	batcher, ok := g.refs.(interface {
+		BlobReferencedBatch(ctx context.Context, shas []string) (map[string]bool, error)
+	})
+	if !ok {
+		return nil, errors.New("blob references batch: not supported")
+	}
+	return batcher.BlobReferencedBatch(ctx, shas)
+}
+
+// BlobsDeleted пробрасывает пакетную проверку удалённости во внутреннюю
+// реализацию; без неё — пособытийно через checker (медленно, но корректно).
+func (g revivedGuard) BlobsDeleted(ctx context.Context, shas []string) (map[string]bool, error) {
+	if batcher, ok := g.refs.(interface {
+		BlobsDeleted(ctx context.Context, shas []string) (map[string]bool, error)
+	}); ok {
+		return batcher.BlobsDeleted(ctx, shas)
+	}
+	out := map[string]bool{}
+	for _, sha := range shas {
+		_, deleted, err := g.checker.BlobDeleted(ctx, sha)
+		if err != nil {
+			return nil, err
+		}
+		out[strings.ToLower(sha)] = deleted
+	}
+	return out, nil
+}
+
 // ReapDeletedBlobs — один проход рипера: находит все мягко удалённые блобы и
 // прогоняет их через тот же PruneBlobs. Идемпотентно: отсутствие файла — не
 // ошибка. Закрывает дыру, когда нода упала между коммитом проекции blob.deleted
@@ -253,4 +301,59 @@ func RunBlobReaper(ctx context.Context, lister DeletedBlobLister, refs BlobRefer
 			runOnce()
 		}
 	}
+}
+
+// batchFirstPass — групповой отсев перед полным двухпроходным путём: блобы,
+// на которые ссылается хоть одно наблюдение (или снова активные после
+// ре-аплоада), выкидываются из списка. Ответ пакета консервативен: «ссылается»
+// при любом сомнении, поэтому безопаснее per-sha проверок, а не строже.
+// Ошибка пакетной проверки не фатальна: исходный список сохраняется, все блобы
+// пройдут полный путь с per-sha проверками.
+func batchFirstPass(
+	ctx context.Context,
+	batcher interface {
+		BlobReferencedBatch(ctx context.Context, shas []string) (map[string]bool, error)
+	},
+	deleter interface {
+		BlobsDeleted(ctx context.Context, shas []string) (map[string]bool, error)
+	},
+	refs BlobReferencer,
+	shas []string,
+	log *slog.Logger,
+) []string {
+	_ = refs
+	var valid []string
+	for _, sha := range shas {
+		if ValidSha256Hex(sha) {
+			valid = append(valid, sha)
+		}
+	}
+	referenced, err := batcher.BlobReferencedBatch(ctx, valid)
+	if err != nil {
+		log.Warn("blob prune: batch reference check failed, falling back to per-blob checks", "err", err)
+		return shas
+	}
+	deleted, err := deleter.BlobsDeleted(ctx, valid)
+	if err != nil {
+		log.Warn("blob prune: batch deletion check failed, falling back to per-blob checks", "err", err)
+		return shas
+	}
+	out := make([]string, 0, len(shas))
+	for _, sha := range shas {
+		if !ValidSha256Hex(sha) {
+			continue
+		}
+		key := strings.ToLower(sha)
+		if referenced[key] {
+			log.Debug("blob prune: still referenced by observations", "sha256", sha)
+			continue
+		}
+		if !deleted[key] {
+			// блоб снова активен — не удаляем (revivedGuard в per-sha пути дал бы то же)
+			log.Debug("blob prune: blob revived before delete", "sha256", sha)
+			continue
+		}
+		out = append(out, sha)
+	}
+	return out
 }
