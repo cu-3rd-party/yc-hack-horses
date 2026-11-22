@@ -290,6 +290,10 @@ func New(cfg *config.Config) (*App, error) {
 // детектор боксов YOLO11s, оценщик позы ViTPose+ и эмбеддер DINOv2-B + ArcFace.
 // Возвращает анализатор и функцию остановки ресурсов.
 func buildHorseID(cfg *config.Config, reidDir string) (comparison.Analyzer, func(), error) {
+	// ONNX Runtime — один на процесс: инициализируем до первых сессий.
+	if err := vitpose.EnsureRuntime(cfg.Inference.RuntimeLib); err != nil {
+		return nil, func() {}, fmt.Errorf("horseid: onnxruntime: %w", err)
+	}
 	// Детектор боксов: YOLO11s поверх onnxruntime (адаптер в пакете yolo).
 	detector := yolo.New(yolo.Config{
 		ModelPath:      cfg.Inference.ModelPath,

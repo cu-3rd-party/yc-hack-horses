@@ -144,6 +144,10 @@ func (e *Estimator) Close() error {
 // ONNX Runtime — процесс-глобальный, включая несколько оценщиков в одном процессе.
 var runtimeMu sync.Mutex
 
+// EnsureRuntime инициализирует process-global ONNX Runtime (идемпотентно).
+// Вызывается до создания любых сессий (vitpose, horseid/DINOv2, yolo).
+func EnsureRuntime(path string) error { return initRuntime(path) }
+
 func initRuntime(path string) error {
 	runtimeMu.Lock()
 	defer runtimeMu.Unlock()
