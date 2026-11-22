@@ -1,6 +1,7 @@
 package vitpose
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid/horseid"
@@ -141,7 +142,14 @@ func transformPreds(px, py float64, center, scale [2]float32, w, h int) (float64
 
 // decode превращает тепмапы (NumKeypoints, HeatmapHeight, HeatmapWidth) в 17 точек
 // в координатах исходного (уменьшенного) фото. box задаётся как [x0,y0,x1,y1].
-func decode(heatmaps []float32, box [4]float64) []horseid.KeyPoint {
+// Неверная длина буфера — ошибка, а не паника на индексации: форму выхода ONNX-графа
+// нельзя считать гарантированной (модель могли подложить другую).
+func decode(heatmaps []float32, box [4]float64) ([]horseid.KeyPoint, error) {
+	want := NumKeypoints * HeatmapHeight * HeatmapWidth
+	if len(heatmaps) != want {
+		return nil, fmt.Errorf("vitpose: неверная длина тепмап %d, ожидалось %d (%dx%dx%d)",
+			len(heatmaps), want, NumKeypoints, HeatmapHeight, HeatmapWidth)
+	}
 	center, scale := boxToCenterAndScale(box[0], box[1], box[2]-box[0], box[3]-box[1])
 	plane := HeatmapHeight * HeatmapWidth
 	kps := make([]horseid.KeyPoint, NumKeypoints)
@@ -167,5 +175,5 @@ func decode(heatmaps []float32, box [4]float64) []horseid.KeyPoint {
 		X, Y := transformPreds(rx, ry, center, scale, HeatmapWidth, HeatmapHeight)
 		kps[kp] = horseid.KeyPoint{X: X, Y: Y, Score: score}
 	}
-	return kps
+	return kps, nil
 }

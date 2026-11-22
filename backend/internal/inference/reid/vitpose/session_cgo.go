@@ -97,6 +97,10 @@ func (e *Estimator) Estimate(ctx context.Context, img image.Image, box [4]float6
 	if box[2] <= box[0] || box[3] <= box[1] {
 		return nil, fmt.Errorf("%w: некорректный бокс %v", inference.ErrInvalidImage, box)
 	}
+	// nil-изображение иначе паникует в preprocess на img.Bounds().
+	if img == nil {
+		return nil, fmt.Errorf("%w: изображение не задано", inference.ErrInvalidImage)
+	}
 	if err := e.ensureSession(); err != nil {
 		return nil, err
 	}
@@ -116,7 +120,11 @@ func (e *Estimator) Estimate(ctx context.Context, img image.Image, box [4]float6
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return decode(out.GetData(), box), nil
+	kps, err := decode(out.GetData(), box)
+	if err != nil {
+		return nil, err
+	}
+	return kps, nil
 }
 
 // Close освобождает сессию. Повторные вызовы безопасны.
