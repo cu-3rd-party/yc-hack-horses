@@ -53,3 +53,8 @@ inference:
   # model_path: "infra/models/yolo26x.onnx"  # по умолчанию из DATA_DIR/models
   # runtime_lib: "infra/models/libonnxruntime.so.1.31.1"
   # reid_model_dir: "infra/models/reid-v1"  # поиск по MegaDescriptor-L-384, измерения по маскам для просмотра
+  # reid_model_path: "/data/models/dinov2_ft_s3.fp16.onnx"  # CUshki v6 (DINOv2-L файнтюн, ONNX fp16, вход 448);
+  #     несколько членов ансамбля — через ";". Задан — заменяет megadescriptor. Скачивание:
+  #     infra/scripts/download-cushki-model.sh
+  # reid_model_input_size: 448               # сторона входа cushki-модели (дефолт 448)
+  # reid_cushki_config: "/data/models/cushki_fusion_config.json"  # калибровка матричной головой + open-set 0.3

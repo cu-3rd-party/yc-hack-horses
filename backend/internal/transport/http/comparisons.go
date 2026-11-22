@@ -15,6 +15,7 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
 	"github.com/go-chi/chi/v5"
@@ -121,7 +122,17 @@ func createComparison(d Deps) http.HandlerFunc {
 			}
 			for _, p := range found {
 				p.Descriptor.CaptureTime = capture
-				det := comparison.Detection{ID: uuid.Must(uuid.NewV7()).String(), Confidence: p.Confidence, Annotation: p.Annotation, Candidates: comparison.Rank(p.Descriptor, refs, form.TopK)}
+				var candidates []comparison.Candidate
+				newSuspected := false
+				if reid.IsCushkiVersion(p.Descriptor.Version) {
+					// CUshki v6: косинусное ранжирование (agg=max) с
+					// опциональной калибровкой матричной головой + open-set.
+					candidates = comparison.RankCushki(d.CushkiHead, p.Descriptor, refs, form.TopK)
+					newSuspected = d.CushkiHead != nil && reid.CushkiIsNewSuspected(d.CushkiHead, p.Descriptor.Vector)
+				} else {
+					candidates = comparison.Rank(p.Descriptor, refs, form.TopK)
+				}
+				det := comparison.Detection{ID: uuid.Must(uuid.NewV7()).String(), Confidence: p.Confidence, Annotation: p.Annotation, Candidates: candidates, NewSuspected: newSuspected}
 				result.Detections = append(result.Detections, det)
 				review.Items = append(review.Items, comparison.Item{Detection: det, Descriptor: p.Descriptor})
 			}

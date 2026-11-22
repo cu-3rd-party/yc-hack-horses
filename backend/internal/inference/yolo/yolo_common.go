@@ -11,7 +11,13 @@ type Config struct {
 	ModelPath      string
 	RuntimeLibPath string
 	// ReIDModelDir enables visual retrieval and separate per-instance measurements.
-	ReIDModelDir  string
+	ReIDModelDir string
+	// ReIDModelPath — путь к ONNX-модели CUshki v6 (динамический dim, вход
+	// 448x448). Несколько членов ансамбля — через разделитель ";". Задан —
+	// используется cushki-энкодер вместо megadescriptor из ReIDModelDir.
+	ReIDModelPath string
+	// ReIDModelInputSize — сторона входа cushki-модели (0 = 448).
+	ReIDModelInputSize int
 	IncludeMasks  bool
 	ConfThreshold float64
 	IouThreshold  float64
@@ -29,6 +35,10 @@ type Config struct {
 	// FusionConfig — внешние коэффициенты скоринга (см. reid.FusionConfig).
 	// nil — сырой фьюжн-скор (дефолт, поведение без калибровки).
 	FusionConfig *reid.FusionConfig
+	// CushkiConfig — конфиг CUshki v6 (fusion_config.json: матричная
+	// логистическая голова, классы, open-set порог; см. reid.CushkiConfig).
+	// nil — скоринг чистым косинусом без калибровки.
+	CushkiConfig *reid.CushkiConfig
 }
 
 type InstanceEmbedding struct {

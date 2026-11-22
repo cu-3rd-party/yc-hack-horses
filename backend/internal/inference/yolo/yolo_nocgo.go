@@ -32,6 +32,13 @@ func (e *Engine) SetFusionConfig(fc *reid.FusionConfig) { e.cfg.FusionConfig = f
 // FusionConfig — та же сигнатура, что в cgo-варианте.
 func (e *Engine) FusionConfig() *reid.FusionConfig { return e.cfg.FusionConfig }
 
+// SetCushkiConfig — та же сигнатура, что в cgo-варианте: инференс без CGO
+// недоступен, конфиг сохраняется для совместимости API.
+func (e *Engine) SetCushkiConfig(cc *reid.CushkiConfig) { e.cfg.CushkiConfig = cc }
+
+// CushkiConfig — та же сигнатура, что в cgo-варианте.
+func (e *Engine) CushkiConfig() *reid.CushkiConfig { return e.cfg.CushkiConfig }
+
 // unavailable — причина деградации: бинарник собран без cgo.
 func (e *Engine) unavailable() error {
 	return fmt.Errorf("%w: бинарник собран без CGO, YOLO-инференс недоступен (ADR-0012)", inference.ErrModelUnavailable)

@@ -36,11 +36,17 @@ type Engine struct {
 	// fusionCfg — внешние коэффициенты скоринга ReID; nil — сырой скор.
 	// Читается после New/SetFusionConfig до старта обработки, мутации нет.
 	fusionCfg   *reid.FusionConfig
+	// cushkiCfg — конфиг CUshki v6; nil — скоринг без калибровки.
+	// Читается после New/SetCushkiConfig до старта обработки, мутации нет.
+	cushkiCfg   *reid.CushkiConfig
 
 	life        sync.RWMutex
 	reidOnce    sync.Once
 	encoder     *reid.Encoder
 	encoderErr  error
+	cushkiOnce   sync.Once
+	cushki       *reid.CushkiEncoder
+	cushkiErr    error
 	segmentOnce sync.Once
 	segmenter   *reid.Segmenter
 	segmentErr  error
@@ -59,6 +65,13 @@ func (e *Engine) SetFusionConfig(fc *reid.FusionConfig) { e.fusionCfg = fc }
 // FusionConfig возвращает активные коэффициенты (nil — не заданы).
 func (e *Engine) FusionConfig() *reid.FusionConfig { return e.fusionCfg }
 
+// SetCushkiConfig включает конфиг CUshki v6 (калибровка матричной головой,
+// open-set). Вызывать до начала обработки запросов.
+func (e *Engine) SetCushkiConfig(cc *reid.CushkiConfig) { e.cushkiCfg = cc }
+
+// CushkiConfig возвращает активный конфиг CUshki (nil — не задан).
+func (e *Engine) CushkiConfig() *reid.CushkiConfig { return e.cushkiCfg }
+
 func New(cfg Config) *Engine {
 	if cfg.ConfThreshold <= 0 || cfg.ConfThreshold >= 1 {
 		cfg.ConfThreshold = DefaultConfThreshold
@@ -69,7 +82,34 @@ func New(cfg Config) *Engine {
 	if cfg.Delegate == nil {
 		cfg.Delegate = NewHistogramDelegate()
 	}
-	return &Engine{cfg: cfg, fusionCfg: cfg.FusionConfig}
+	return &Engine{cfg: cfg, fusionCfg: cfg.FusionConfig, cushkiCfg: cfg.CushkiConfig}
+}
+
+// cushkiPaths разбирает список членов ансамбля из ReIDModelPath (";"-разделитель).
+func cushkiPaths(path string) []string {
+	var out []string
+	for _, p := range strings.Split(path, ";") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ensureCushki лениво открывает cushki-энкодер (reid_model_path задан).
+func (e *Engine) ensureCushki() error {
+	if e.cfg.ReIDModelPath == "" {
+		return nil
+	}
+	e.cushkiOnce.Do(func() {
+		paths := cushkiPaths(e.cfg.ReIDModelPath)
+		size := e.cfg.ReIDModelInputSize
+		if size <= 0 {
+			size = 448
+		}
+		e.cushki, e.cushkiErr = reid.OpenCushkiEncoder(paths, size)
+	})
+	return e.cushkiErr
 }
 
 // ensureSession лениво инициализирует onnxruntime и сессию модели.
@@ -235,7 +275,12 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 	if len(rows) == 0 {
 		return nil, inference.ErrNoAnimalDetected
 	}
-	if e.cfg.ReIDModelDir != "" {
+	if e.cfg.ReIDModelPath != "" {
+		if err = e.ensureCushki(); err != nil {
+			return nil, fmt.Errorf("%w: %v", inference.ErrModelUnavailable, err)
+		}
+	}
+	if e.cfg.ReIDModelDir != "" && e.cushki == nil {
 		e.reidOnce.Do(func() { e.encoder, e.encoderErr = reid.Open(e.cfg.ReIDModelDir) })
 		if e.encoderErr != nil {
 			return nil, fmt.Errorf("%w: %v", inference.ErrModelUnavailable, e.encoderErr)
@@ -246,7 +291,19 @@ func (e *Engine) embeddings(ctx context.Context, input inference.ImageInput, reg
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		if e.encoder != nil {
+		if e.cushki != nil {
+			var seg *reid.Segmenter
+			if e.cfg.ReIDModelDir != "" {
+				e.segmentOnce.Do(func() { e.segmenter, e.segmentErr = reid.OpenSegmenter(e.cfg.ReIDModelDir) })
+				if e.segmentErr == nil {
+					seg = e.segmenter
+				}
+			}
+			row.Embedding, err = e.cushki.Embed(ctx, img, row.Box, seg)
+			if err != nil {
+				return nil, err
+			}
+		} else if e.encoder != nil {
 			row.Embedding, err = e.encoder.Embed(ctx, img, row.Box)
 			if err != nil {
 				return nil, err
@@ -285,7 +342,11 @@ func (e *Engine) measureInstance(ctx context.Context, img image.Image, row *Inst
 	}
 	e.segmentOnce.Do(func() { e.segmenter, e.segmentErr = reid.OpenSegmenter(e.cfg.ReIDModelDir) })
 	if e.segmentErr != nil {
-		row.MeasurementError = e.segmentErr.Error()
+		// cushki-энкодер уже учёл fallback маски внутри Embed (центральный
+		// кроп, отдельная версия) — не инвалидируем эмбеддинг.
+		if e.cushki == nil {
+			row.MeasurementError = e.segmentErr.Error()
+		}
 		return
 	}
 	region, err := e.segmenter.Region(ctx, img, row.Box, true)

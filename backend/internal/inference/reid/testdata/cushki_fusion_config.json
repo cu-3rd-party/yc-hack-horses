@@ -1,0 +1,22 @@
+{
+  "logistic": {
+    "weights": [
+      [0.03583931550383568, -0.02591099962592125, 0.15, -0.2],
+      [-0.011624008417129517, 0.04724256321787834, -0.08, 0.09]
+    ],
+    "bias": [0.0123, -0.0456]
+  },
+  "new_threshold": 0.3,
+  "classes": ["Азарм", "Беркут"],
+  "feature_layout": {
+    "dim": 4,
+    "blocks": ["s2-raw", "s2-masked", "s3-raw", "s3-masked"],
+    "block_dims": 1,
+    "note": "reduced fixture: 2 members x (raw, masked), dim 4"
+  },
+  "side_axis": {
+    "dim": 4,
+    "axis": [-0.048722051084041595, 0.05172219127416611, -0.03050775267183709, 0.038810014724731445],
+    "semantics": "unit PCA axis over E(crop)-E(flip(crop)), reid/viewpoint.py fit_axis"
+  }
+}

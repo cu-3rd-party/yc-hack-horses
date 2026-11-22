@@ -57,7 +57,10 @@ func run() error {
 	refs := make([]comparison.Reference, 0, len(gallery))
 	versions := map[string]bool{}
 	for _, r := range gallery {
-		if len(r.Vector) != reid.Dimension || (!reid.IsSilhouette(r.Version) && r.Version != reid.BoxVersion) || r.Name == "" || r.SHA == "" {
+		// megadescriptor-версии привязаны к reid.Dimension; cushki-версии
+		// (cushki-*) несут динамическую размерность модели — валидна любая
+		// положительная длина, кросс-версии отсекает проверка versions ниже.
+		if !reid.ValidVector(r.Version, len(r.Vector)) || (!reid.IsSilhouette(r.Version) && r.Version != reid.BoxVersion && !reid.IsCushkiVersion(r.Version)) || r.Name == "" || r.SHA == "" {
 			return fmt.Errorf("invalid gallery reference %q", r.SHA)
 		}
 		versions[r.Version] = true
@@ -79,7 +82,7 @@ func run() error {
 		}
 		row := ranked{MaskPNG: q.MaskPNG, SHA: q.SHA, Source: q.Source, Box: q.Box, Confidence: q.Confidence, Candidates: []comparison.Candidate{}}
 		if q.Source != "missed" {
-			if (!reid.IsSilhouette(q.Version) && q.Version != reid.BoxVersion) || len(q.Vector) != reid.Dimension {
+			if (!reid.IsSilhouette(q.Version) && q.Version != reid.BoxVersion && !reid.IsCushkiVersion(q.Version)) || !reid.ValidVector(q.Version, len(q.Vector)) {
 				return fmt.Errorf("invalid query descriptor %q", q.SHA)
 			}
 			if len(refs) > 0 && !versions[q.Version] {

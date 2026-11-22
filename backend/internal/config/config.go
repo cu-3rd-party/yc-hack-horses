@@ -75,6 +75,16 @@ type Config struct {
 		// RuntimeLib — путь к onnxruntime shared library (engine=yolo).
 		RuntimeLib   string `yaml:"runtime_lib"`
 		ReIDModelDir string `yaml:"reid_model_dir"`
+		// ReIDModelPath — путь к ONNX-модели CUshki v6 (файнтюн DINOv2-L,
+		// вход 448x448, имена «pixel_values»/«embedding»). Несколько членов
+		// ансамбля — через «;» в порядке блоков feature_layout. Задан —
+		// cushki-энкодер заменяет megadescriptor (reid_model_dir остаётся
+		// источником сегментера для масок/признаков, опционально).
+		// Без sha-верификации: целостность обеспечивает pinned sha256 в
+		// infra/scripts/download-cushki-model.sh.
+		ReIDModelPath string `yaml:"reid_model_path"`
+		// ReIDModelInputSize — сторона входа cushki-модели (0 = 448).
+		ReIDModelInputSize int `yaml:"reid_model_input_size"`
 		// ReIDDualVariant — двухвариантное кодирование ReID (raw + masked,
 		// приём против фонового переобучения из zapovednik-public).
 		// По умолчанию выключено: старое поведение (только raw).
@@ -83,6 +93,11 @@ type Config struct {
 		// (калибровка логрегрессией, веса фьюжна, open-set порог; см.
 		// NOTICE.md). Пусто — скоринг сырым фьюжн-скором (дефолт).
 		ReIDFusionConfig string `yaml:"reid_fusion_config"`
+		// ReIDCushkiConfig — путь к fusion_config.json CUshki v6 (матричная
+		// логистическая голова по классам, open-set порог; см.
+		// reid.CushkiConfig). Опционален: без него cushki-скоринг — чистый
+		// косинус. Относится только к cushki-эмбеддингам (reid_model_path).
+		ReIDCushkiConfig string `yaml:"reid_cushki_config"`
 	} `yaml:"inference"`
 	// Enrollment — автоматическая выдача клиентских сертификатов
 	// (ADR-0007 amended, ADR-0014). Включается только на central-ноде;
@@ -183,8 +198,11 @@ func (c *Config) applyEnv() {
 	envString("INFER_MODEL_PATH", &c.Inference.ModelPath)
 	envString("INFER_RUNTIME_LIB", &c.Inference.RuntimeLib)
 	envString("INFER_REID_MODEL_DIR", &c.Inference.ReIDModelDir)
+	envString("INFER_REID_MODEL_PATH", &c.Inference.ReIDModelPath)
+	envInt("INFER_REID_MODEL_INPUT_SIZE", &c.Inference.ReIDModelInputSize)
 	envBool("INFER_REID_DUAL_VARIANT", &c.Inference.ReIDDualVariant)
 	envString("INFER_REID_FUSION_CONFIG", &c.Inference.ReIDFusionConfig)
+	envString("INFER_REID_CUSHKI_CONFIG", &c.Inference.ReIDCushkiConfig)
 	envString("WEB_DIR", &c.Api.WebDir)
 	envBool("API_DOCS_ENABLED", &c.Api.DocsEnabled)
 	envBool("ENROLLMENT_ENABLED", &c.Enrollment.Enabled)

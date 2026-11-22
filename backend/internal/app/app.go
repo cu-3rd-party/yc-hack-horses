@@ -159,6 +159,7 @@ func New(cfg *config.Config) (*App, error) {
 	var comparisonModel comparison.Analyzer
 	var assets *modelassets.Manager
 	modelMode := "disabled"
+	var cushkiHead *reid.CushkiConfig
 	switch cfg.Inference.Engine {
 	case "reference":
 		cvEngine = inference.NewReference(blobs)
@@ -177,6 +178,12 @@ func New(cfg *config.Config) (*App, error) {
 			ReIDModelDir:   cfg.Inference.ReIDModelDir,
 			IncludeMasks:   true,
 			Blobs:          blobs,
+			// CUshki v6: reid_model_path переключает энкодер на cushki
+			// (dyn dim, 448x448); reid_cushki_config добавляет калибровку
+			// матричной головой и open-set. Оба ключа опциональны —
+			// дефолтное поведение (megadescriptor) не меняется.
+			ReIDModelPath:      cfg.Inference.ReIDModelPath,
+			ReIDModelInputSize: cfg.Inference.ReIDModelInputSize,
 		})
 		// Внешние коэффициенты скоринга ReID (калибровка/фьюжн/open-set):
 		// файл опционален, отсутствие — дефолтное поведение (сырой скор).
@@ -188,6 +195,16 @@ func New(cfg *config.Config) (*App, error) {
 				return nil, err
 			}
 			detector.SetFusionConfig(fc)
+		}
+		// CUshki v6 (fusion_config.json): матричная голова, классы,
+		// open-set. Ошибка явного пути — фатальна при старте, как и выше.
+		if cfg.Inference.ReIDCushkiConfig != "" {
+			cc, err := reid.LoadCushkiConfig(cfg.Inference.ReIDCushkiConfig)
+			if err != nil {
+				return nil, err
+			}
+			detector.SetCushkiConfig(cc)
+			cushkiHead = cc
 		}
 		cvEngine = detector
 		comparisonModel = comparison.LocalModel{Detector: detector}
@@ -241,6 +258,7 @@ func New(cfg *config.Config) (*App, error) {
 		BlobStats:       a.blobStatsSnapshot,
 		Engine:          cvEngine,
 		ComparisonModel: comparisonModel,
+		CushkiHead:      cushkiHead,
 		Models:          assets, ModelMode: modelMode, RuntimePath: cfg.Inference.RuntimeLib,
 		DocsEnabled: cfg.Api.DocsEnabled,
 		WebDir:      cfg.Api.WebDir,

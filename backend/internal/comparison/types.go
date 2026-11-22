@@ -27,6 +27,10 @@ type Candidate struct {
 	HorseID        string  `json:"horse_id"`
 	Name           string  `json:"name"`
 	Similarity     float64 `json:"cosine_similarity"`
+	// Probability — откалиброванная вероятность головы CUshki
+	// (fusion_config.json); 0 — не калибровалось (нет головы, личность вне
+	// классов или megadescriptor-путь).
+	Probability    float64 `json:"probability,omitempty"`
 	BestPhotoID    string  `json:"best_photo_id"`
 	ReferenceCount int     `json:"reference_count"`
 	SeasonFallback bool    `json:"season_fallback"`
@@ -36,6 +40,9 @@ type Detection struct {
 	Confidence float64     `json:"detection_confidence"`
 	Annotation Annotation  `json:"annotation"`
 	Candidates []Candidate `json:"candidates"`
+	// NewSuspected — open-set CUshki: вероятность лучшего класса головы
+	// ниже new_threshold (0.3); false без головы (дефолтное поведение).
+	NewSuspected bool `json:"new_suspected,omitempty"`
 }
 type Result struct {
 	ID         string      `json:"comparison_id"`

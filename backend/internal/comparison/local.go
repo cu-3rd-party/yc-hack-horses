@@ -57,11 +57,16 @@ func localPrediction(row yolo.InstanceEmbedding, frame image.Rectangle) (Predict
 	if row.Box.Empty() || !row.Box.In(frame) || !(row.Confidence >= 0 && row.Confidence <= 1) {
 		return Prediction{}, ErrModel
 	}
-	if row.MeasurementError != "" && row.Embedding.ModelVersion != reid.BoxVersion {
+	if row.MeasurementError != "" && row.Embedding.ModelVersion != reid.BoxVersion &&
+		!reid.IsCushkiVersion(row.Embedding.ModelVersion) {
 		return Prediction{}, fmt.Errorf("%w: %s", ErrLocalSegmentation, row.MeasurementError)
 	}
 	annotation, err := AnnotationFromMask(row.MaskPNG, row.Traits, row.Box, frame)
-	if errors.Is(err, ErrLocalSegmentation) && row.Embedding.ModelVersion == reid.BoxVersion {
+	// Cushki-энкодер деградирует маску внутри Embed (центральный кроп,
+	// отдельная версия) — эмбеддинг остаётся валидным, аннотация fallback
+	// к прямоугольнику, как у BoxVersion.
+	boxFallback := row.Embedding.ModelVersion == reid.BoxVersion || reid.IsCushkiVersion(row.Embedding.ModelVersion)
+	if errors.Is(err, ErrLocalSegmentation) && boxFallback {
 		left := float64(row.Box.Min.X-frame.Min.X) / float64(frame.Dx())
 		top := float64(row.Box.Min.Y-frame.Min.Y) / float64(frame.Dy())
 		right := float64(row.Box.Max.X-frame.Min.X) / float64(frame.Dx())

@@ -181,3 +181,83 @@ func Rank(query Descriptor, references []Reference, k int) []Candidate {
 	})
 	return out[:min(len(out), k)]
 }
+
+// RankCushki — ранжирование CUshki v6 (версии cushki-*): косинус по сшитым
+// признакам, агрегация по личности как максимум по её эталонам (agg=max,
+// семантика CUshki), опциональная калибровка матричной головой из
+// fusion_config.json. Если каждая личность галереи входит в классы головы,
+// порядок — по откалиброванной вероятности; иначе — по косинусу
+// (вероятности вне классов головы не определены и в Candidate не пишутся).
+// Open-set (isNewSuspected, порог 0.3) считается вызывающей стороной через
+// reid.CushkiIsNewSuspected по тому же признаку запроса.
+//
+// head == nil — чистый косинус; head с несовпадающей размерностью признака
+// откалиброванных вероятностей не даст (Probabilities вернёт nil) — порядок
+// останется косинусным. Кросс-версии отсечены фильтром r.Version != query.Version.
+func RankCushki(head *reid.CushkiConfig, query Descriptor, references []Reference, k int) []Candidate {
+	if !reid.IsCushkiVersion(query.Version) {
+		return []Candidate{}
+	}
+	q := unit(query.Vector)
+	if k < 1 || q == nil {
+		return []Candidate{}
+	}
+	groups := map[string][]Reference{}
+	var order []string
+	for _, r := range references {
+		if !r.searchable() || r.Version != query.Version || len(r.Vector) != len(q) {
+			continue
+		}
+		r.Vector = unit(r.Vector)
+		if r.Vector == nil {
+			continue
+		}
+		if _, seen := groups[r.HorseID]; !seen {
+			order = append(order, r.HorseID)
+		}
+		groups[r.HorseID] = append(groups[r.HorseID], r)
+	}
+	requested := calendarSeason(query.CaptureTime)
+	out := make([]Candidate, 0, len(groups))
+	for _, id := range order {
+		rows := groups[id]
+		refs, fallback := recentReferences(rows, requested)
+		candidate := Candidate{HorseID: id, Name: refs[0].Name, ReferenceCount: len(refs), SeasonFallback: fallback}
+		best := -2.
+		for _, r := range refs {
+			score := dotUnit(q, r.Vector)
+			if score > best || (score == best && r.PhotoID < candidate.BestPhotoID) {
+				best = score
+				candidate.BestPhotoID = r.PhotoID
+			}
+		}
+		candidate.Similarity = best
+		out = append(out, candidate)
+	}
+	byProbability := false
+	if head != nil {
+		probs, allCalibrated := head.CalibratedScores(order, q)
+		if allCalibrated {
+			byProbability = true
+			for i := range out {
+				out[i].Probability = probs[i]
+			}
+		}
+	}
+	if byProbability {
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Probability == out[j].Probability {
+				return out[i].HorseID < out[j].HorseID
+			}
+			return out[i].Probability > out[j].Probability
+		})
+	} else {
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Similarity == out[j].Similarity {
+				return out[i].HorseID < out[j].HorseID
+			}
+			return out[i].Similarity > out[j].Similarity
+		})
+	}
+	return out[:min(len(out), k)]
+}

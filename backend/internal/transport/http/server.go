@@ -12,6 +12,7 @@ import (
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/enroll"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/inference"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/inference/reid"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/modelassets"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -23,6 +24,9 @@ import (
 // Deps — зависимости транспортного слоя.
 type Deps struct {
 	ComparisonModel        comparison.Analyzer
+	// CushkiHead — конфиг CUshki v6 (fusion_config.json); nil — скоринг
+	// без калибровки (дефолтное поведение).
+	CushkiHead *reid.CushkiConfig
 	Models                 *modelassets.Manager
 	ModelMode, RuntimePath string
 	Store                  *sqlstore.Store
