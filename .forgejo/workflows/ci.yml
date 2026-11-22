@@ -22,6 +22,7 @@ jobs:
       image: ${{ steps.changes.outputs.image }}
       backend: ${{ steps.changes.outputs.backend }}
       frontend: ${{ steps.changes.outputs.frontend }}
+      data: ${{ steps.changes.outputs.data }}
     steps:
       - uses: actions/checkout@v4
         with:
