@@ -1,5 +1,6 @@
 // Smoke test for a local image or the deployed journal. Demo decisions stay in this fresh context.
 import assert from 'node:assert/strict';
+import { checkDemoPassports } from './passports.mjs';
 import { chromium } from 'playwright-core';
 
 const url = new URL(process.env.JOURNAL_URL || 'http://127.0.0.1:8080/');
@@ -28,6 +29,8 @@ try {
   const mode = page.getByRole('switch', { name: 'Демосценарии' });
   assert.equal(await mode.getAttribute('aria-checked'), 'false');
   await mode.click();
+  await nav('Особи');
+  await checkDemoPassports(page, ['Сарана']);
   await nav('Распознавание');
   await page.getByRole('button', { name: /На выпасе/ }).click();
   await heading('Сравнение наблюдений');

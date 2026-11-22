@@ -465,6 +465,16 @@ export const herd = [
   { id: 'altai', name: 'Алтай' },
 ];
 
+// Resolve by seed ID so existing demo journals can use the bundled documents.
+const passportFiles = import.meta.glob<string>('./passports/*.pdf', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+});
+export function demoPassportUrl(horseId: string) {
+  return passportFiles['./passports/' + horseId + '.pdf'];
+}
+
 // Demo ratings belong to the bundled images, including copies saved by earlier versions.
 const demoQuality = new Map([
   ['./photos/single.jpg', 'Высокое'],

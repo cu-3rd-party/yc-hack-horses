@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkDemoPassports } from './passports.mjs';
 import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -205,7 +206,9 @@ try {
   await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   await nav('Особи');
   await snap('gallery');
+  await checkDemoPassports(page, ['Сарана', 'Буран', 'Луна', 'Алтай']);
   await page.getByRole('button', { name: /Искра/ }).click();
+  assert.ok(await button('Открыть паспорт').isDisabled());
   await page.getByRole('button', { name: /Две особи — вторая/ }).click();
   await dialog().getByRole('heading', { name: 'Две особи — вторая.jpg' }).waitFor();
   await page.keyboard.press('Escape');
