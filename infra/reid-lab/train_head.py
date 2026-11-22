@@ -34,6 +34,7 @@ ap.add_argument("--dim", type=int, default=256)
 ap.add_argument("--margin", type=float, default=0.3)
 ap.add_argument("--w_head", type=float, default=0.5)
 ap.add_argument("--folds", type=int, default=5)
+ap.add_argument("--trip_days", type=int, default=0, help="merge same-horse sessions closer than N days into one group")
 args = ap.parse_args()
 torch.manual_seed(0)
 np.random.seed(0)
@@ -55,6 +56,18 @@ SEASON = {12: 0, 1: 0, 2: 0, 3: 1, 4: 1, 5: 1, 6: 2, 7: 2, 8: 2, 9: 3, 10: 3, 11
 season = np.array([SEASON[int(d[5:7])] for d in dstr])
 view = np.array([det[i]["view"] for i in ids])
 groups = np.array([f"{h}|{d}" for h, d in zip(horse, dstr)])
+if args.trip_days:
+    # merge a horse's shooting days that are <= trip_days apart into one group ("trip"),
+    # so near-identical consecutive days never straddle train and test
+    trip = {}
+    for h in horses:
+        ds = sorted(set(days[horse == h]))
+        k = 0
+        for a, b in zip([None] + ds[:-1], ds):
+            if a is not None and b - a > args.trip_days:
+                k += 1
+            trip[(h, b)] = f"{h}|trip{k}"
+    groups = np.array([trip[(h, d)] for h, d in zip(horse, days)])
 
 
 def train_arc(X, yy):

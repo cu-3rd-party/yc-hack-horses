@@ -1,0 +1,22 @@
+C:\Users\win10\AppData\Local\Programs\Python\Python311\Lib\site-packages\sklearn\model_selection\_split.py:1036: UserWarning: The least populated class in y has only 2 members, which is less than n_splits=4.
+  warnings.warn(
+train 254  val 150  test 191  | 54 configs, tuned by 4-fold grouped CV on train+val
+
+Top configs in dev-CV (selection score = macro top-1 + 0.5*top-3):
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.5, "agg": "top2"} n=297 top1 0.434 top3 0.572 macro1 0.353 | cross-season 0.51(156) | win 0.93(14) spr 0.33(187) sum 0.88(52) aut 0.18(44)
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.7, "agg": "top2"} n=297 top1 0.431 top3 0.566 macro1 0.353 | cross-season 0.52(156) | win 0.86(14) spr 0.33(187) sum 0.85(52) aut 0.23(44)
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.7, "agg": "max"} n=297 top1 0.424 top3 0.566 macro1 0.352 | cross-season 0.51(156) | win 0.86(14) spr 0.32(187) sum 0.85(52) aut 0.23(44)
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.5, "agg": "max"} n=297 top1 0.428 top3 0.562 macro1 0.350 | cross-season 0.51(156) | win 0.93(14) spr 0.33(187) sum 0.87(52) aut 0.18(44)
+{"bb": "ensemble", "aug": false, "gray": true, "w": 0.5, "agg": "top2"} n=297 top1 0.391 top3 0.566 macro1 0.337 | cross-season 0.44(156) | win 0.86(14) spr 0.27(187) sum 0.90(52) aut 0.16(44)
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.3, "agg": "top2"} n=297 top1 0.428 top3 0.586 macro1 0.319 | cross-season 0.52(156) | win 0.93(14) spr 0.32(187) sum 0.88(52) aut 0.18(44)
+{"bb": "ensemble", "aug": true, "gray": false, "w": 0.7, "agg": "max"} n=297 top1 0.391 top3 0.542 macro1 0.339 | cross-season 0.46(156) | win 0.93(14) spr 0.29(187) sum 0.81(52) aut 0.14(44)
+{"bb": "dinov2", "aug": false, "gray": false, "w": 0.3, "agg": "max"} n=297 top1 0.421 top3 0.579 macro1 0.318 | cross-season 0.51(156) | win 0.93(14) spr 0.31(187) sum 0.88(52) aut 0.18(44)
+
+CHOSEN: {'bb': 'dinov2', 'aug': False, 'gray': False, 'w': 0.5, 'agg': 'top2'}
+
+=== TEST (held out; evaluated once, after selection) ===
+chosen {"bb": "dinov2", "aug": false, "gray": false, "w": 0.5, "agg": "top2"} n=191 top1 0.241 top3 0.707 macro1 0.266 | cross-season 0.23(79) | win 1.00(15) spr 0.20(142) sum 0.00(25) aut 0.22(9)
+  per horse top-1: {'Азарм': '2/9', 'Асфея': '0/3', 'Бася': '0/3', 'Беркут': '1/10', 'Буда': '12/14', 'Весна': '1/11', 'Витр': '1/11', 'Иней': '0/13', 'Руди': '15/15', 'Стэнли': '7/51', 'Тигр': '1/17', 'Тмин': '0/25', 'Фемида': '5/6', 'Шторм': '1/3'}
+ref: raw MiewID head+body, max                 n=191 top1 0.178 top3 0.393 macro1 0.165 | cross-season 0.30(79) | win 0.87(15) spr 0.07(142) sum 0.28(25) aut 0.44(9)
+ref: previous default (MiewID ArcFace, w=.5, max) n=191 top1 0.199 top3 0.377 macro1 0.213 | cross-season 0.30(79) | win 0.87(15) spr 0.11(142) sum 0.24(25) aut 0.44(9)
+ref: chosen + 710 pre-2024-11 photos in train/gallery n=191 top1 0.372 top3 0.743 macro1 0.421 | cross-season 0.12(25) | win 0.93(15) spr 0.33(142) sum 0.12(25) aut 0.78(9)

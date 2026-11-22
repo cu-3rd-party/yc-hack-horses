@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HorseID — демо</title>
+<style>
+:root{--bg:#0b0e0d;--panel:#131917;--panel2:#1a2220;--line:#24302c;--text:#eef2f0;--muted:#93a29c;--accent:#bef264;--warn:#ffb86b;--head:#ff785a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--line)}
+header b{font-size:18px} header .tag{color:var(--accent);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+header nav{margin-left:auto;display:flex;gap:6px}
+header nav button{background:none;border:1px solid var(--line);color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer}
+header nav button.on{border-color:var(--accent);color:var(--text)}
+main{display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:20px;padding:20px 24px;max-width:1500px;margin:0 auto}
+main>section{min-width:0}
+@media(max-width:900px){main{grid-template-columns:1fr;padding:16px}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+#drop{border:2px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;cursor:pointer;color:var(--muted);transition:.15s}
+#drop.over,#drop:hover{border-color:var(--accent);color:var(--text)}
+#drop strong{color:var(--text);display:block;font-size:16px;margin-bottom:4px}
+#query img{width:100%;border-radius:10px;margin-top:14px;display:block}
+.row{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.chip{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:13px;color:var(--muted)}
+.chip b{color:var(--text);font-weight:600}
+#query #headcrop{width:96px;height:96px;margin-top:0;object-fit:cover;border-radius:10px;border:2px solid var(--head)}
+.legend{font-size:12px;color:var(--muted)} .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:-1px}
+.note{font-size:12px;color:var(--muted);margin-top:12px}
+.warn{background:#2a2015;border:1px solid #5a4020;color:var(--warn);border-radius:10px;padding:8px 12px;font-size:13px;margin-top:12px}
+#results{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.card.top{border-color:var(--accent)}
+.card .hd{display:flex;align-items:baseline;gap:12px;cursor:pointer}
+.card .name{font-size:18px;font-weight:650}
+.card .pct{margin-left:auto;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.card.top .pct{color:var(--accent)}
+.bar{height:6px;background:var(--panel2);border-radius:6px;margin:8px 0 10px;overflow:hidden}
+.bar span{display:block;height:100%;background:var(--accent);border-radius:6px}
+.sub{font-size:12px;color:var(--muted)}
+.strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.ph{flex:0 0 auto;width:132px;cursor:pointer}
+.ph img{width:132px;height:96px;object-fit:cover;border-radius:8px;display:block;background:var(--panel2)}
+.ph div{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.more{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:12px}
+.more:hover{color:var(--text);border-color:var(--accent)}
+.empty{color:var(--muted);text-align:center;padding:60px 20px}
+.spin{display:inline-block;width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;vertical-align:-4px;margin-right:8px}
+@keyframes s{to{transform:rotate(360deg)}}
+#drawer{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:10}
+#drawer.on{display:block}
+#drawer .box{position:absolute;right:0;top:0;bottom:0;width:min(920px,100%);background:var(--bg);border-left:1px solid var(--line);overflow-y:auto;padding:20px 24px}
+#drawer h2{margin:0 0 4px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0}
+.filters button{background:var(--panel);border:1px solid var(--line);color:var(--muted);border-radius:999px;padding:4px 10px;cursor:pointer;font-size:13px}
+.filters button.on{border-color:var(--accent);color:var(--text)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.grid .ph{width:auto}.grid .ph img{width:100%;height:120px}
+.close{float:right;background:none;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer}
+#lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;z-index:20;align-items:center;justify-content:center;cursor:zoom-out}
+#lightbox.on{display:flex}#lightbox img{max-width:94vw;max-height:88vh;border-radius:10px}
+#lightbox div{position:absolute;bottom:18px;left:0;right:0;text-align:center;color:var(--muted)}
+#all{display:none;padding:20px 24px;max-width:1500px;margin:0 auto}
+.hgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.hcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;cursor:pointer}
+.hcard:hover{border-color:var(--accent)}
+.hcard img{width:100%;height:150px;object-fit:cover;display:block}
+.hcard div{padding:8px 12px}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="tag">Заповедный хакатон · кейс 03</div><b>HorseID — распознавание лошадей Пржевальского</b></div>
+  <nav><button id="tabId" class="on">Распознать</button><button id="tabAll">Фотобанк</button></nav>
+</header>
+
+<main id="idv">
+  <section>
+    <div class="panel">
+      <div id="drop"><strong>Перетащите фото лошади сюда</strong>или нажмите, чтобы выбрать файл</div>
+      <input id="file" type="file" accept="image/*" hidden>
+      <div class="row"><button class="more" id="rnd">🎲 Случайное тестовое фото (не было в обучении)</button><span class="sub" id="truth"></span></div>
+      <div id="query"></div>
+    </div>
+    <p class="note" id="modelnote">Модель: YOLO11s → ключевые точки ViTPose+ → эмбеддинги головы и тела → ArcFace-проекция → поиск по фотобанку. Проценты — softmax по сходству, не калиброваны.</p>
+    <p class="note"><b style="color:var(--text)">Как честно проверить:</b> данные — только последние 2 года. Тестовая выборка (<span id="ntest">—</span> фото, отдельные поездки, все сезоны) не участвовала ни в обучении, ни в подборе параметров, ни в фотобанке. Эти снимки лежат в <code>reid-lab/parts/test_photos/</code>, кличка — в имени файла, или жмите 🎲. Фото из банка демо пометит как дубликат.</p>
+  </section>
+  <section id="results"><div class="panel empty">Загрузите фото — здесь появятся кандидаты с процентом совпадения</div></section>
+</main>
+
+<div id="all"><div class="hgrid" id="hgrid"></div></div>
+
+<div id="drawer"><div class="box">
+  <button class="close" onclick="closeDrawer()">Закрыть</button>
+  <h2 id="dname"></h2><div class="sub" id="dsub"></div>
+  <div class="filters" id="dfilt"></div>
+  <div class="grid" id="dgrid"></div>
+</div></div>
+<div id="lightbox" onclick="this.classList.remove('on')"><img id="lbimg" alt=""><div id="lbcap"></div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let HORSES = [];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cap = p => [p.date, p.season, p.view].filter(Boolean).join(' · ');
+
+fetch('/api/horses').then(r => r.json()).then(h => { HORSES = h; renderAll(); });
+
+const drop = $('#drop'), file = $('#file');
+drop.onclick = () => file.click();
+file.onchange = () => file.files[0] && send(file.files[0]);
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => ev.dataTransfer.files[0] && send(ev.dataTransfer.files[0]));
+document.addEventListener('paste', ev => { const f = [...ev.clipboardData.files][0]; if (f) send(f); });
+
+fetch('/api/info').then(r => r.json()).then(i => {
+  $('#ntest').textContent = i.test;
+  const bb = {miewid: 'MiewID', dinov2: 'DINOv2', ensemble: 'MiewID + DINOv2'}[i.config.bb] || i.config.bb;
+  $('#modelnote').textContent = `Модель: YOLO11s → ключевые точки ViTPose+ → эмбеддинги ${bb} головы и тела → ArcFace-проекция` +
+    `${i.config.aug ? ' (с сезонными аугментациями)' : ''} → поиск по фотобанку (${i.horses} лошадей, ${i.gallery} фото, без тестовой выборки). ` +
+    `Вес головы ${i.config.w}. Проценты — softmax по сходству, не калиброваны.`;
+});
+let TESTS = [];
+fetch('/api/test_photos').then(r => r.json()).then(t => { TESTS = t; if (!t.length) $('#rnd').style.display = 'none'; });
+$('#rnd').onclick = async () => {
+  const name = TESTS[Math.floor(Math.random() * TESTS.length)];
+  const b = await (await fetch('/test_photo/' + encodeURIComponent(name))).blob();
+  const [horse, date] = name.split('__');
+  send(new File([b], 'test.jpg', {type: 'image/jpeg'}), `Правильный ответ: <b style="color:var(--text)">${esc(horse)}</b> (снято ${esc(date)})`);
+};
+
+async function send(f, truth) {
+  showTab('id');
+  $('#truth').innerHTML = truth || '';
+  $('#query').innerHTML = '';
+  $('#results').innerHTML = '<div class="panel empty"><span class="spin"></span>Ищу лошадь, голову и сравниваю с фотобанком…</div>';
+  const fd = new FormData(); fd.append('file', f);
+  let d;
+  try { d = await (await fetch('/api/identify', {method: 'POST', body: fd})).json(); }
+  catch (e) { $('#results').innerHTML = '<div class="panel empty">Ошибка запроса</div>'; return; }
+  if (d.error || d.detail) { $('#results').innerHTML = `<div class="panel empty">${esc(d.error || d.detail)}</div>`; return; }
+  $('#query').innerHTML = `
+    <img src="${d.query}" alt="запрос">
+    <div class="legend"><i style="background:var(--accent)"></i>лошадь<i style="background:var(--head)"></i>голова</div>
+    <div class="row">
+      ${d.head_crop ? `<img id="headcrop" src="${d.head_crop}" alt="голова">` : ''}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <span class="chip">Бок: <b>${esc(d.view)}</b></span>
+        <span class="chip">Голова: <b>${d.head_found ? 'найдена' : 'не найдена'}</b></span>
+        <span class="chip">Лошадей в кадре: <b>${d.n_horses}</b></span>
+      </div>
+    </div>
+    ${d.n_horses > 1 ? '<div class="warn">В кадре несколько лошадей — сравнивается самая крупная.</div>' : ''}
+    ${d.duplicate ? `<div class="warn">Это фото уже есть в фотобанке (${esc(d.duplicate.horse)}, ${esc(d.duplicate.date)}) — результат будет завышен.</div>` : ''}`;
+  $('#results').innerHTML = d.results.map((r, k) => `
+    <div class="card ${k === 0 ? 'top' : ''}">
+      <div class="hd" onclick="openHorse('${esc(r.name)}')">
+        <span class="name">${k + 1}. ${esc(r.name)}</span>
+        <span class="sub">голова ${r.head == null ? '—' : r.head.toFixed(2)} · тело ${r.body == null ? '—' : r.body.toFixed(2)}</span>
+        <span class="pct">${r.pct.toFixed(1)}%</span>
+      </div>
+      <div class="bar"><span style="width:${Math.max(1, r.pct)}%"></span></div>
+      ${k < 5 ? `<div class="strip">${r.best.map(p => ph(p, 'сх. ' + p.sim.toFixed(2))).join('')}</div>
+      <div style="margin-top:8px"><button class="more" onclick="openHorse('${esc(r.name)}')">Все фото ${esc(r.name)} →</button></div>` : ''}
+    </div>`).join('');
+}
+
+function ph(p, extra) {
+  const c = [extra, cap(p)].filter(Boolean).join(' · ');
+  return `<div class="ph" onclick="event.stopPropagation();zoom('${p.id}','${esc(c)}')" title="${esc(c)}">
+    <img loading="lazy" src="/crop/body/${p.id}.jpg" alt=""><div>${esc(c)}</div></div>`;
+}
+function zoom(id, c) { $('#lbimg').src = `/crop/body/${id}.jpg`; $('#lbcap').textContent = c; $('#lightbox').classList.add('on'); }
+
+let cur = null, filt = 'все';
+function openHorse(name) {
+  cur = HORSES.find(h => h.name === name); if (!cur) return; filt = 'все';
+  $('#dname').textContent = cur.name;
+  $('#dsub').textContent = `${cur.count} фото в банке · от новых к старым`;
+  $('#drawer').classList.add('on'); drawGrid();
+}
+function drawGrid() {
+  const opts = ['все', 'зима', 'весна', 'лето', 'осень', 'левый бок', 'правый бок'];
+  $('#dfilt').innerHTML = opts.map(o => `<button class="${o === filt ? 'on' : ''}" onclick="filt='${o}';drawGrid()">${o}</button>`).join('');
+  const list = cur.photos.filter(p => filt === 'все' || p.season === filt || p.view === filt);
+  $('#dgrid').innerHTML = list.map(p => ph(p)).join('') || '<div class="sub">нет фото</div>';
+}
+function closeDrawer() { $('#drawer').classList.remove('on'); }
+$('#drawer').onclick = e => { if (e.target.id === 'drawer') closeDrawer(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { $('#lightbox').classList.remove('on'); closeDrawer(); } });
+
+function renderAll() {
+  $('#hgrid').innerHTML = HORSES.map(h => `<div class="hcard" onclick="openHorse('${esc(h.name)}')">
+    <img loading="lazy" src="/crop/body/${h.cover}.jpg" alt=""><div><b>${esc(h.name)}</b><div class="sub">${h.count} фото</div></div></div>`).join('');
+}
+function showTab(t) {
+  $('#idv').style.display = t === 'id' ? '' : 'none'; $('#all').style.display = t === 'all' ? 'block' : 'none';
+  $('#tabId').classList.toggle('on', t === 'id'); $('#tabAll').classList.toggle('on', t === 'all');
+}
+$('#tabId').onclick = () => showTab('id'); $('#tabAll').onclick = () => showTab('all');
+</script>
+</body>
+</html>
