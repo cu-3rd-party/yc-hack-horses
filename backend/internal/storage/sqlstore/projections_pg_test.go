@@ -109,3 +109,41 @@ func TestProjectBlobDeletedPG_LIKEReferenceAndGuard(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), n)
 }
+
+// TestListActiveReferencedBlobHashesPG — на PostgreSQL потребности blob-синка
+// не пусты и ссылка в верхнем регистре резолвится: blob_ids — JSONB, разворот
+// идёт через jsonb_array_elements_text, а резолв в sha256 — по LOWER обеих
+// сторон соединения (наблюдение ссылается на blobs.id/sha256 в другом регистре,
+// чем хранит таблица).
+func TestListActiveReferencedBlobHashesPG(t *testing.T) {
+	s := openPGTestStore(t)
+	ctx := context.Background()
+
+	// Блоб зарегистрирован в верхнем регистре (ValidSha256Hex допускает A-F).
+	sha := strings.ToUpper(strings.Repeat("cd", 32))
+	blobID := uuid.Must(uuid.NewV7()).String()
+	obsID := uuid.NewString()
+	base := time.Now().UTC().Truncate(time.Millisecond)
+
+	_, err := s.UpsertBlobAt(ctx, domain.Blob{ID: blobID, SHA256: sha, MimeType: "image/jpeg", Size: 10}, base)
+	require.NoError(t, err)
+	// Наблюдение ссылается на id в верхнем регистре (blobs.id хранится в нижнем)
+	// и на sha256 в нижнем (сам хэш хранится в верхнем): обе ссылки должны
+	// резолвиться в канонический sha256.
+	require.NoError(t, s.CreateObservation(ctx, domain.Observation{
+		ID: obsID, NodeID: "n1", ObservedAt: base, ObserverID: "w",
+		BlobIDs: []string{strings.ToUpper(blobID), strings.ToLower(sha)},
+	}))
+
+	got, err := s.ListActiveReferencedBlobHashes(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, got, "выборка потребностей не должна быть пустой")
+	require.Contains(t, got, strings.ToLower(sha), "резолв отдаёт канонический sha256 в нижнем регистре")
+
+	// Инвалидированное наблюдение из потребностей выпадает.
+	_, err = s.InvalidateObservation(ctx, obsID, base, "blob deleted")
+	require.NoError(t, err)
+	got, err = s.ListActiveReferencedBlobHashes(ctx)
+	require.NoError(t, err)
+	require.Empty(t, got, "инвалидированное наблюдение не даёт потребностей")
+}

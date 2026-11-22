@@ -138,7 +138,10 @@ func New(cfg *config.Config) (*App, error) {
 		// эта нода, и не больше MaxBlobsPerSync за цикл — датасет 16ГБ целиком
 		// по всем устройствам не гоняем.
 		NeededBlobHashes: func(ctx context.Context) ([]string, error) {
-			return referencedBlobHashes(ctx, store)
+			// Хэши активных наблюдений этой ноды: инвалидированные (фото
+			// удалено событием blob.deleted) в потребности не входят — их
+			// записи живут только в истории, а файлы пирам качать незачем.
+			return syncengine.ReferencedBlobHashes(ctx, store)
 		},
 	}, slog.Default())
 
@@ -250,20 +253,15 @@ func New(cfg *config.Config) (*App, error) {
 	return a, nil
 }
 
-// referencedBlobHashes — хэши blob'ов, на которые ссылается эта нода
-// (наблюдения локального лога). Источник потребностей для неполного
-// blob-синха: движок качает только недостающие из этого списка.
-func referencedBlobHashes(ctx context.Context, store *sqlstore.Store) ([]string, error) {
-	return store.ListReferencedBlobHashes(ctx)
-}
-
 // blobStatsSnapshot — срез состояния блобов для /api/v1/node: сколько ссылок
-// из наблюдений и сколько из них ещё не на диске (неполный синк). Legacy-ссылки
-// на blob UUID в missing не считаются: через content-addressed канал не едут.
+// из активных наблюдений и сколько из них ещё не на диске (неполный синк).
+// Потребности считает тот же хелпер, что и движок синка (ReferencedBlobHashes):
+// инвалидированные наблюдения не в счёт, а blob_ids уже приведены к sha256, так
+// что срез и движок не расходятся на пустых/legacy-записях.
 func (a *App) blobStatsSnapshot() any {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	hashes, err := a.store.ListReferencedBlobHashes(ctx)
+	hashes, err := syncengine.ReferencedBlobHashes(ctx, a.store)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}

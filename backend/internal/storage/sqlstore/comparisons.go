@@ -142,6 +142,15 @@ func (s *Store) ObservationHistory(ctx context.Context, horseID string, annotati
 	return out, nil
 }
 
+// historyPhotos отдаёт фото наблюдений без фильтра по invalidated_at, поэтому
+// в историю лошади попадают и снимки инвалидированных наблюдений (blob.deleted).
+// Запись остаётся аудит-следом — что, когда и почему удалили, — поэтому строку
+// истории не скрываем. Но само фото из истории уже не отдаётся: метаданные
+// блоба погашены, GET /api/v1/blobs/<sha256> отвечает 404, и содержимое не
+// достать. Файл на нодах, где он уже лежал, не прунится: BlobReferenced видит
+// ссылку из blob_ids (или legacy sha256) и не даёт prune снести его с диска;
+// в потребности blob-синка инвалидированные наблюдения не входят — мёртвые файлы
+// пиры не качают.
 func (s *Store) historyPhotos(ctx context.Context, horseID string, annotations bool) (map[string][]comparison.Photo, error) {
 	geometry := "'null'"
 	if annotations {
