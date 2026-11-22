@@ -71,9 +71,11 @@ func (s *Store) CreateReviewedObservation(ctx context.Context, record comparison
 }
 
 func (s *Store) References(ctx context.Context, version string) ([]comparison.Reference, error) {
+	// Вектора наблюдений с удалённым фото (invalidated_at != 0) не участвуют
+	// в сравнении и не попадают в подтверждённые reference photos.
 	rows, err := s.query(ctx, `SELECT h.id,h.metadata,p.id,p.embedding FROM observation_photos p
 		JOIN observations o ON o.id=p.observation_id JOIN horses h ON h.id=o.horse_id
-		WHERE p.model_version=? AND h.identity_status <> 'merged'`, version)
+		WHERE p.model_version=? AND h.identity_status <> 'merged' AND o.invalidated_at = 0`, version)
 	if err != nil {
 		return nil, err
 	}

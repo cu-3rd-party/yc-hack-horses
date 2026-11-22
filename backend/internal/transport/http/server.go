@@ -100,6 +100,7 @@ func NewRouter(d Deps) http.Handler {
 		v1.Post("/blobs", uploadBlob(d))
 		v1.Get("/blobs", listBlobs(d))
 		v1.Get("/blobs/{sha256}", getBlob(d))
+		v1.Delete("/blobs/{sha256}", deleteBlob(d))
 
 		// CV-inference (ADR-0012): предсказание, подтверждение человеком, поиск похожих.
 		v1.Post("/inference/traits", postInferenceTraits(d))

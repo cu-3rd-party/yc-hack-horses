@@ -131,7 +131,7 @@ func New(cfg *config.Config) (*App, error) {
 	}
 	// Движок пишет удалённые события через projectedStore: Append + проекции
 	// в одной транзакции (локальные события проектируются HTTP-хендлерами).
-	pstore := newProjectedStore(store)
+	pstore := newProjectedStore(store, blobs)
 	engine := syncengine.NewEngine(pstore, blobs, identity, syncengine.Config{
 		BatchLimit: cfg.Sync.BatchSize,
 		// Неполный синк (issue #17): качаем только blob'ы, на которые ссылается

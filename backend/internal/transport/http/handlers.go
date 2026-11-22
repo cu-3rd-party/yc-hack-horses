@@ -211,10 +211,21 @@ func createObservation(d Deps) http.HandlerFunc {
 			BlobIDs:    form.BlobIDs,
 		}
 		err := appendWithProjection(d, r.Context(), domain.EventObservationAdded, o.ID, mustJSON(o),
-			func(tx *sqlstore.Store) error { return tx.CreateObservation(r.Context(), o) })
+			func(tx *sqlstore.Store) error {
+				if err := tx.CreateObservation(r.Context(), o); err != nil {
+					return err
+				}
+				// Фото могло быть удалено раньше: наблюдение создаётся, но сразу неактивным.
+				_, err := tx.InvalidateObservationIfBlobsDeleted(r.Context(), o.ID, o.BlobIDs, "blob deleted")
+				return err
+			})
 		if err != nil {
 			serverError(w, err)
 			return
+		}
+		// Ответ — из проекции: наблюдение могло быть помечено неактуальным сразу.
+		if stored, err := d.Store.GetObservation(r.Context(), o.ID); err == nil {
+			o = stored
 		}
 		w.Header().Set("Location", "/api/v1/observations/"+o.ID)
 		writeJSON(w, http.StatusCreated, o)
@@ -336,6 +347,38 @@ func getBlob(d Deps) http.HandlerFunc {
 		w.Header().Set("ETag", `"`+meta.SHA256+`"`)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
+	}
+}
+
+// deleteBlob мягко удаляет блоб событием blob.deleted: строка помечается в
+// проекции, файл удаляет она же — и только если на блоб не ссылается ни одно
+// наблюдение. Повторный DELETE уже удалённого блоба — 404.
+func deleteBlob(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sha := chi.URLParam(r, "sha256")
+		if !storage.ValidSha256Hex(sha) {
+			writeError(w, http.StatusBadRequest, "invalid sha256")
+			return
+		}
+		if _, err := d.Store.GetBlobMeta(r.Context(), sha); err != nil {
+			notFoundOrServerError(w, err, "blob")
+			return
+		}
+		reason := strings.TrimSpace(r.URL.Query().Get("reason"))
+		now := d.Clock().UTC()
+		payload := domain.BlobDeleted{SHA256: sha, DeletedAt: now, Reason: reason}
+		err := appendWithProjection(d, r.Context(), domain.EventBlobDeleted, sha, mustJSON(payload),
+			func(tx *sqlstore.Store) error {
+				_, err := tx.ProjectBlobDeleted(r.Context(), sha, now, reason)
+				return err
+			})
+		if err != nil {
+			serverError(w, err)
+			return
+		}
+		// Файл — после коммита события и проекции (см. storage.PruneBlobs).
+		storage.PruneBlobs(r.Context(), d.Store, d.Blobs, []string{sha}, slog.Default())
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

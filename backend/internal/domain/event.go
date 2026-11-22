@@ -53,6 +53,7 @@ const (
 	EventIdentityProposed = "identity.proposed"
 	EventIdentityResolved = "identity.resolved"
 	EventBlobRegistered   = "blob.registered"
+	EventBlobDeleted      = "blob.deleted"
 )
 
 // Horse — животное. Стабильный UUID, не производный от признаков.
@@ -75,6 +76,11 @@ type Observation struct {
 	ObserverID  string    `json:"observer_id"`
 	BlobIDs     []string  `json:"blob_ids"`
 	TraitSnapID string    `json:"trait_snapshot_id,omitempty"`
+	// Invalidated — фото наблюдения удалено (blob.deleted): запись остаётся в
+	// журнале, но не участвует в сравнении и помечается в UI как устаревшая.
+	Invalidated        bool       `json:"invalidated"`
+	InvalidatedAt      *time.Time `json:"invalidated_at,omitempty"`
+	InvalidationReason string     `json:"invalidation_reason,omitempty"`
 }
 
 // TraitSnapshot — признаки из одного фото. Fingerprint — для поиска похожих, НЕ биологическое ID.
@@ -96,6 +102,14 @@ type Blob struct {
 	SHA256   string `json:"sha256"`
 	MimeType string `json:"mime_type"`
 	Size     int64  `json:"size"`
+}
+
+// BlobDeleted — payload события blob.deleted. AggregateID события — SHA256.
+// Файл удаляется только когда на блоб больше не ссылается ни одно наблюдение.
+type BlobDeleted struct {
+	SHA256    string    `json:"sha256"`
+	DeletedAt time.Time `json:"deleted_at"`
+	Reason    string    `json:"reason"`
 }
 
 var ErrInvalidEvent = errors.New("invalid event")

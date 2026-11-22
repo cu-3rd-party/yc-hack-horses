@@ -331,6 +331,19 @@ func buildOpenAPISpec() []byte {
 		"200": {Description: "содержимое блоба (произвольный тип)"},
 	})
 
+	deleteBlobOp := add("/api/v1/blobs/{sha256}", "delete", "Удалить блоб", "deleteBlob", "blobs",
+		"Мягкое удаление событием blob.deleted: блоб перестаёт отдаваться (GET → 404), наблюдения с "+
+			"этим фото помечаются invalidated и выпадают из сравнения. Файл удаляется, только если на "+
+			"блоб не ссылается ни одно наблюдение. Повторная доставка события — no-op.")
+	deleteBlobOp.Parameters = []parameter{
+		idParam("sha256", "hex-строка sha256 содержимого"),
+		{Name: "reason", In: "query", Schema: strSchema("причина удаления — попадает в payload события")},
+	}
+	deleteBlobOp.Responses = merge(stdErrors(true), map[string]resp{
+		"204": {Description: "блоб удалён, событие blob.deleted записано"},
+		"404": {Description: "блоб не найден или уже удалён", Content: errorRef},
+	})
+
 	// --- node ---
 	nodeOp := add("/api/v1/node", "get", "Информация о ноде", "getNodeInfo", "node",
 		"Счётчики событий, векторное время, драйвер хранилища; при запущенном sync — блок sync.")
@@ -406,6 +419,9 @@ func buildOpenAPISpec() []byte {
 		prop("name", strSchema("Имя наблюдения")).
 		prop("photos", schemaArray(schemaRef("ObservationPhoto"))).
 		prop("trait_snapshot_id", strSchema("привязанный снимок признаков, опционально")).
+		prop("invalidated", schemaNode{"type": "boolean", "description": "фото наблюдения удалено (blob.deleted): запись устарела, вектора не участвуют в сравнении"}).
+		prop("invalidated_at", schemaNode{"type": "string", "format": "date-time", "description": "когда фото было удалено"}).
+		prop("invalidation_reason", strSchema("причина инвалидации, из payload blob.deleted")).
 		required("id", "node_id", "observed_at", "location", "observer_id", "blob_ids")
 	schemas["Blob"] = schemaNode{"type": "object"}.
 		prop("id", strSchema("UUIDv7")).

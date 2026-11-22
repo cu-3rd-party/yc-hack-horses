@@ -138,7 +138,7 @@ func TestScalarEnabled(t *testing.T) {
 		"/api/v1/comparisons/{id}/cancel": {"post"},
 		"/api/v1/comparisons/{id}/detections/{detection}/decision": {"put"},
 		"/api/v1/blobs":                {"get", "post"},
-		"/api/v1/blobs/{sha256}":       {"get"},
+		"/api/v1/blobs/{sha256}":       {"get", "delete"},
 		"/api/v1/inference/traits":     {"post"},
 		"/api/v1/trait_snapshots/{id}": {"patch"},
 		"/api/v1/inference/similar":    {"get"},

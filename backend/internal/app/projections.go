@@ -21,20 +21,32 @@ import (
 // projectedStore — адаптер storage.EventStore поверх sqlstore.Store,
 // который при Append (события от пиров) строит проекции.
 type projectedStore struct {
-	st *sqlstore.Store
+	st    *sqlstore.Store
+	blobs storage.BlobStore // может быть nil: тогда физические файлы не трогаем
 }
 
 var _ storage.EventStore = (*projectedStore)(nil)
 
-func newProjectedStore(st *sqlstore.Store) *projectedStore { return &projectedStore{st: st} }
+func newProjectedStore(st *sqlstore.Store, blobs storage.BlobStore) *projectedStore {
+	return &projectedStore{st: st, blobs: blobs}
+}
 
 func (p *projectedStore) Append(ctx context.Context, events []domain.Event) error {
-	return p.st.RunInTx(ctx, func(tx *sqlstore.Store) error {
+	var prune []string
+	err := p.st.RunInTx(ctx, func(tx *sqlstore.Store) error {
 		if err := tx.Append(ctx, events); err != nil {
 			return fmt.Errorf("projected append: %w", err)
 		}
-		return applyProjections(ctx, tx, events)
+		var err error
+		prune, err = applyProjections(ctx, tx, events)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	// Файлы удаляем после коммита: откат транзакции не вернёт данные на диск.
+	storage.PruneBlobs(ctx, p.st, p.blobs, prune, slog.Default())
+	return nil
 }
 
 func (p *projectedStore) GetEvents(ctx context.Context, cursor storage.Cursor, limit int) ([]domain.Event, error) {
@@ -55,7 +67,9 @@ func (p *projectedStore) LastSequence(ctx context.Context, nodeID string) (uint6
 
 // applyProjections идемпотентно строит проекции для типов событий, у которых
 // они есть. Неизвестные типы пропускаются (forward compatibility).
-func applyProjections(ctx context.Context, tx *sqlstore.Store, events []domain.Event) error {
+// Возвращает sha256 блобов, чьи файлы можно попробовать удалить после коммита.
+func applyProjections(ctx context.Context, tx *sqlstore.Store, events []domain.Event) ([]string, error) {
+	var prune []string
 	for _, ev := range events {
 		var err error
 		switch ev.EventType {
@@ -65,14 +79,20 @@ func applyProjections(ctx context.Context, tx *sqlstore.Store, events []domain.E
 			err = projectObservationAdded(ctx, tx, ev)
 		case domain.EventBlobRegistered:
 			err = projectBlobRegistered(ctx, tx, ev)
+		case domain.EventBlobDeleted:
+			var sha string
+			sha, err = projectBlobDeleted(ctx, tx, ev)
+			if err == nil {
+				prune = append(prune, sha)
+			}
 		default:
 			slog.Debug("no projection for event type", "event_type", ev.EventType, "event_id", ev.EventID)
 		}
 		if err != nil {
-			return fmt.Errorf("projection %s %s: %w", ev.EventType, ev.EventID, err)
+			return nil, fmt.Errorf("projection %s %s: %w", ev.EventType, ev.EventID, err)
 		}
 	}
-	return nil
+	return prune, nil
 }
 
 // projectHorseCreated: лошадь уже есть (повторная доставка) — no-op.
@@ -93,7 +113,9 @@ func projectHorseCreated(ctx context.Context, tx *sqlstore.Store, ev domain.Even
 	return nil
 }
 
-// projectObservationAdded: наблюдение уже есть — no-op.
+// projectObservationAdded: наблюдение уже есть — no-op (метку invalidated
+// повторная доставка события не сбрасывает: удаление фото необратимо).
+// Новое наблюдение, ссылающееся на уже удалённый блоб, сразу помечается неактуальным.
 func projectObservationAdded(ctx context.Context, tx *sqlstore.Store, ev domain.Event) error {
 	var o comparison.ObservationEvent
 	if err := json.Unmarshal(ev.Payload, &o); err != nil {
@@ -108,10 +130,18 @@ func projectObservationAdded(ctx context.Context, tx *sqlstore.Store, ev domain.
 	if err := tx.CreateReviewedObservation(ctx, o); err != nil {
 		return fmt.Errorf("create observation: %w", err)
 	}
+	refs := append([]string{}, o.BlobIDs...)
+	for _, p := range o.Photos {
+		refs = append(refs, p.SHA)
+	}
+	if _, err := tx.InvalidateObservationIfBlobsDeleted(ctx, o.ID, refs, "blob deleted"); err != nil {
+		return fmt.Errorf("invalidate observation: %w", err)
+	}
 	return nil
 }
 
-// projectBlobRegistered: UpsertBlob сам дедуплицирует по sha256.
+// projectBlobRegistered: UpsertBlob сам дедуплицирует по sha256; после мягкого
+// удаления ре-аплоад снова регистрирует блоб (deleted_at сбрасывается).
 func projectBlobRegistered(ctx context.Context, tx *sqlstore.Store, ev domain.Event) error {
 	var b domain.Blob
 	if err := json.Unmarshal(ev.Payload, &b); err != nil {
@@ -128,4 +158,28 @@ func projectBlobRegistered(ctx context.Context, tx *sqlstore.Store, ev domain.Ev
 		return fmt.Errorf("upsert blob: %w", err)
 	}
 	return nil
+}
+
+// projectBlobDeleted: мягко удаляет блоб и помечает наблюдения с этим фото
+// неактуальными (их вектора выпадают из сравнения). Повторная доставка — no-op.
+// Возвращает sha256 для попытки удаления файла после коммита.
+func projectBlobDeleted(ctx context.Context, tx *sqlstore.Store, ev domain.Event) (string, error) {
+	var p domain.BlobDeleted
+	if err := json.Unmarshal(ev.Payload, &p); err != nil {
+		return "", fmt.Errorf("decode blob.deleted payload: %w", err)
+	}
+	if p.SHA256 == "" {
+		p.SHA256 = ev.AggregateID
+	}
+	if !storage.ValidSha256Hex(p.SHA256) {
+		return "", fmt.Errorf("invalid sha256 %q", p.SHA256)
+	}
+	deletedAt := p.DeletedAt
+	if deletedAt.IsZero() {
+		deletedAt = ev.OccurredAt
+	}
+	if _, err := tx.ProjectBlobDeleted(ctx, p.SHA256, deletedAt, p.Reason); err != nil {
+		return "", fmt.Errorf("project blob.deleted: %w", err)
+	}
+	return p.SHA256, nil
 }

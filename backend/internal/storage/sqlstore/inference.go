@@ -19,7 +19,7 @@ func (s *Store) GetBlobByID(ctx context.Context, idOrSHA string) (domain.Blob, e
 	var b domain.Blob
 	var created int64
 	err := s.queryRow(ctx,
-		`SELECT id, sha256, mime_type, size, created_at FROM blobs WHERE id = ? OR sha256 = ? ORDER BY id LIMIT 1`,
+		`SELECT id, sha256, mime_type, size, created_at FROM blobs WHERE (id = ? OR sha256 = ?) AND deleted_at = 0 ORDER BY id LIMIT 1`,
 		idOrSHA, idOrSHA,
 	).Scan(&b.ID, &b.SHA256, &b.MimeType, &b.Size, &created)
 	if err != nil {
@@ -70,11 +70,12 @@ func (s *Store) ListSimilarTraitSnapshots(ctx context.Context, fingerprint, excl
 	if limit > 100 {
 		limit = 100
 	}
+	// Снимки без наблюдения остаются в поиске; инвалидированные — выпадают.
 	rows, err := s.query(ctx,
-		`SELECT id, observation_id, model_version, traits, raw_predicted_traits, confidence, fingerprint, confirmed, edited
-		 FROM trait_snapshots
-		 WHERE fingerprint = ? AND id <> ? AND confirmed = 1
-		 ORDER BY id
+		`SELECT ts.id, ts.observation_id, ts.model_version, ts.traits, ts.raw_predicted_traits, ts.confidence, ts.fingerprint, ts.confirmed, ts.edited
+		 FROM trait_snapshots ts LEFT JOIN observations o ON o.id = ts.observation_id
+		 WHERE ts.fingerprint = ? AND ts.id <> ? AND ts.confirmed = 1 AND COALESCE(o.invalidated_at, 0) = 0
+		 ORDER BY ts.id
 		 LIMIT ?`,
 		fingerprint, excludeID, limit,
 	)
