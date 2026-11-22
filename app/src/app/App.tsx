@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
-  Images,
   LoaderCircle,
   RefreshCw,
   ScanLine,
@@ -19,12 +18,15 @@ import { Gallery } from '../pages/gallery';
 import { ObservationLog } from '../pages/observations';
 import { Dashboard, Settings, Sync } from '../pages/system';
 import { Modal } from '../shared/ui/journal-ui';
+function HorseIcon() {
+  return <i className="horse-nav-icon" aria-hidden="true">🐴</i>;
+}
 const sections = [
   {
     label: 'Полевой журнал',
     items: [
       { key: 'review', label: 'Распознавание', icon: ScanLine },
-      { key: 'gallery', label: 'Галерея особей', icon: Images },
+      { key: 'gallery', label: 'Особи', icon: HorseIcon },
       { key: 'log', label: 'Наблюдения', icon: BookOpen },
     ],
   },

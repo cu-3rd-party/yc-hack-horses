@@ -27,6 +27,7 @@ for (const [pattern, mime] of [[/src="([^"]+\.js)"/, /javascript/], [/href="([^"
   assert.ok(asset, 'Expected a built asset: ' + pattern);
   await get(asset, mime);
 }
+await get('/pdfjs/wasm/openjpeg.wasm', /application\/wasm/);
 await get('/photos/single.jpg', /image\/jpeg/);
 await get('/health', /application\/json/);
 await get('/api/scalar', /text\/html/);

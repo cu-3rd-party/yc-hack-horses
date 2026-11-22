@@ -1,3 +1,4 @@
+import type { HorseMetadata } from '../../../packages/contracts/src';
 import type {
   CancelResult,
   ComparisonDecision,
@@ -154,7 +155,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
   });
   if (!node?.node_id || !node.driver) throw new Error(unavailable);
   const [horses, observations, blobs] = await Promise.all([
-    request<{ id: string; metadata?: { name?: string; nickname?: string } }[]>(
+    request<{ id: string; metadata?: HorseMetadata }[]>(
       '/horses',
       'GET',
       undefined,
@@ -174,6 +175,7 @@ export async function getNodeBook(signal?: AbortSignal): Promise<Notebook> {
     horses: horses.map((h) => ({
       id: h.id,
       name: h.metadata?.name || h.metadata?.nickname || h.id,
+      passportSha256: h.metadata?.passport_sha256,
     })),
     observations: observations.map((o) => observation(o, hashes)),
     review: null,

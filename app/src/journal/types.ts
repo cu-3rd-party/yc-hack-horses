@@ -16,6 +16,7 @@ export interface Photo {
   annotation: Annotation;
 }
 export interface Horse {
+  passportSha256?: string;
   id: string;
   name: string;
 }

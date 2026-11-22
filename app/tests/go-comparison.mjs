@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { _electron as electron } from 'playwright-core';
+import { checkPassports } from './passports.mjs';
+import { chromium, _electron as electron } from 'playwright-core';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
 const nodeBinary = process.env.JOURNAL_NODE_BINARY;
@@ -86,6 +87,7 @@ try {
     env: {
       ...process.env,
       NODE_ID: '01990000-0000-7000-8000-00000000000a',
+      WEB_DIR: path.join(project, 'dist'),
       DATA_DIR: root,
       STORAGE_DRIVER: 'sqlite',
       NODE_DSN: path.join(root, 'journal.db'),
@@ -198,6 +200,25 @@ try {
   );
   assert.deepEqual(masks[0].traits[0].polygon[0], [0.05, 0.2]);
   assert.equal(analyses, 2);
+  await app.evaluate(({ session }) => {
+    // Packaged passports must open with only the local node available.
+    session.defaultSession.webRequest.onBeforeRequest(
+      { urls: ['https://*/*', 'http://*/*'] },
+      ({ url }, callback) => callback({ cancel: new URL(url).hostname !== '127.0.0.1' }),
+    );
+  });
+  await checkPassports(page, origin, 'Electron');
+  if (process.argv.includes('--web')) {
+    const browser = await chromium.launch({ channel: process.env.JOURNAL_BROWSER });
+    try {
+      const web = await browser.newPage();
+      web.on('pageerror', error => errors.push(error.message));
+      await web.goto(origin);
+      await checkPassports(web, origin, 'Web');
+    } finally {
+      await browser.close();
+    }
+  }
   assert.deepEqual(errors, []);
   console.log(
     'Electron + Go + SQLite: upload, two independent rankings, annotated history, match and cancellation passed.',

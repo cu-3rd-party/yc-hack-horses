@@ -42,6 +42,7 @@
     "idb": "^8",
     "konva": "^10",
     "lucide-react": "^0.560.0",
+    "pdfjs-dist": "6.5.438",
     "playwright-core": "^1.65.1",
     "react": "^19",
     "react-dom": "^19",
@@ -51,6 +52,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8",
     "vite": "^7",
+    "vite-plugin-static-copy": "3.4.0",
     "vitest": "^3"
   },
   "build": {

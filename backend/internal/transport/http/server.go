@@ -71,7 +71,7 @@ func NewRouter(d Deps) http.Handler {
 
 	if d.WebDir != "" {
 		files := http.FileServer(http.Dir(d.WebDir))
-		for _, route := range []string{"/", "/assets/{file}", "/photos/{file}", "/licenses/{file}"} {
+		for _, route := range []string{"/", "/assets/{file}", "/pdfjs/{group}/{file}", "/photos/{file}", "/licenses/{file}"} {
 			r.Get(route, files.ServeHTTP)
 			r.Head(route, files.ServeHTTP)
 		}
