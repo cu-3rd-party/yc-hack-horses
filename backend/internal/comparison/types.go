@@ -39,6 +39,7 @@ type Result struct {
 	Detections []Detection `json:"detections"`
 }
 type Decision struct {
+	Comment   string `json:"comment,omitempty"`
 	Action    string `json:"action"`
 	HorseID   string `json:"horse_id,omitempty"`
 	HorseName string `json:"horse_name,omitempty"`

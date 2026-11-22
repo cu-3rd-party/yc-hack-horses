@@ -39,11 +39,15 @@ try {
   await page.getByRole('button', { name: 'Зафиксировать результат' }).click();
   const dialog = page.getByRole('dialog');
   const name = 'Проверка веб-журнала';
+  const comment = 'Следы у ручья.\nУтром.';
+  await dialog.getByLabel('Комментарий').fill(comment);
   await dialog.getByLabel('Название наблюдения').fill(name);
   await dialog.getByRole('button', { name: 'Подтвердить' }).click();
   await heading('Новое наблюдение');
   await nav('Наблюдения');
-  await page.getByText(name, { exact: true }).first().waitFor();
+  await page.getByText(name, { exact: true }).first().click();
+  assert.equal(await dialog.locator('dd.observation-comment').textContent(), comment);
+  assert.equal(await dialog.getByRole('button', { name: 'Удалить наблюдение' }).isDisabled(), true);
   assert.deepEqual(errors, []);
   console.log('Live catalog, settings, demo comparison, photos and saved observation passed.');
 } finally {

@@ -65,6 +65,7 @@ type Horse struct {
 
 // Observation — наблюдение. HorseID пуст, если животное ещё не идентифицировано.
 type Observation struct {
+	Comment     string    `json:"comment,omitempty"`
 	Name        string    `json:"name,omitempty"`
 	ID          string    `json:"id"`
 	HorseID     string    `json:"horse_id,omitempty"`

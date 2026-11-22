@@ -240,13 +240,16 @@ try {
   await horseSelect.click();
   await horseSelect.getByRole('option', { name: 'Без привязки' }).click();
   await page.getByLabel('Название наблюдения').fill('Полевой след');
+  await page.getByLabel('Комментарий').fill('След у воды');
   await page.getByLabel('Значение признака', { exact: true }).fill('Тёмная');
   await button('Подставить демокоординаты').click();
   await button('Сохранить запись').click();
   const unlinked = button('Только без привязки');
   await unlinked.click();
   assert.equal(await unlinked.getAttribute('aria-pressed'), 'true');
-  await page.getByRole('button', { name: /Полевой след/ }).waitFor();
+  await page.getByRole('button', { name: /Полевой след/ }).click();
+  await dialog().getByText('След у воды', { exact: true }).waitFor();
+  await page.keyboard.press('Escape');
   await nav('Синхронизация');
   const connection = page.getByRole('switch', { name: 'Связь с демо-узлом' });
   await connection.click();
@@ -282,7 +285,7 @@ try {
     await match('Загруженное фото.' + ext);
     await page.getByRole('heading', { name: 'Новое наблюдение', exact: true }).waitFor();
   }
-  // Real DOM file drops exercise both the multi-file rejection and the valid path.
+  // A multi-file drop advances only after each photo has been reviewed.
   const jpeg = (await readFile(sample)).toString('base64');
   async function drop(count) {
     await page.locator('.dropzone').evaluate(
@@ -299,12 +302,11 @@ try {
     );
   }
   await drop(2);
-  await page
-    .getByRole('alert')
-    .getByText(/одну фотографию/)
-    .waitFor();
-  await drop(1);
+  await page.getByText('Снимок 1 из 2 · drop-0.jpg').waitFor();
   await page.getByText(/иллюстративные признаки/).waitFor();
+  await match('Первая из очереди.jpg');
+  await page.getByText('Снимок 2 из 2 · drop-1.jpg').waitFor();
+  await page.getByRole('heading', { name: 'Сравнение наблюдений' }).waitFor();
   await match('Перетянутый снимок.jpg');
   await nav('Сводка');
   await page.getByText('TAKHI-FIELD-01').waitFor();

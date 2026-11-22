@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { useDemo } from '../journal/mode';
 import { useNotebook } from '../journal/use-journal';
-import { ReviewPage } from '../pages/review';
+import { ReviewPage, type PhotoBatch } from '../pages/review';
 import { Gallery } from '../pages/gallery';
 import { ObservationLog } from '../pages/observations';
 import { Dashboard, Settings, Sync } from '../pages/system';
@@ -55,6 +55,7 @@ function Workspace({
   const [help, setHelp] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [processing, setProcessing] = useState(false),
+    [batch, setBatch] = useState<PhotoBatch | null>(null),
     [logId, setLogId] = useState<string | undefined>();
   const main = useRef<HTMLElement>(null),
     { data: book, error, refetch } = useNotebook();
@@ -137,6 +138,8 @@ function Workspace({
             <>
               {route === 'review' && (
                 <ReviewPage
+                  batch={batch}
+                  setBatch={setBatch}
                   onBusyChange={setProcessing}
                   book={book}
                   openLog={(id) => {

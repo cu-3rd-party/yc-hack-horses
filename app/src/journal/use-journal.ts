@@ -49,7 +49,7 @@ export function useCommand<K extends Parameters<typeof command>[0]>(route: K) {
       if (demo) {
         const book = await command(route, input);
         cache.setQueryData(key(true), book);
-        return;
+        return route === '/analysis' ? book.review ?? undefined : undefined;
       }
       switch (route) {
         case '/analysis': {

@@ -232,7 +232,7 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	require.InDelta(t, .6, c[1].Similarity, 1e-12)
 	require.Equal(t, horses[1], query.Detections[1].Candidates[0].HorseID)
 	require.Len(t, compare(a, 1, 201).Detections[0].Candidates, 1)
-	decision := comparison.Decision{Action: "match", HorseID: horses[0], Name: "Повторное наблюдение"}
+	decision := comparison.Decision{Action: "match", HorseID: horses[0], Name: "Повторное наблюдение", Comment: "Белая отметина\nу левого уха."}
 	bad := decision
 	bad.HorseID = uuid.NewString()
 	reviewRequest(t, "PUT", decisionURL(query, 0), bad, 422, nil)
@@ -272,6 +272,9 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	}
 	require.Equal(t, []string{query.Detections[1].ID}, saved.Remaining)
 	bad = decision
+	bad.Comment = "Другой комментарий"
+	reviewRequest(t, "PUT", decisionURL(query, 0), bad, 409, nil)
+	bad = decision
 	bad.Name = "Другая запись"
 	reviewRequest(t, "PUT", decisionURL(query, 0), bad, 409, nil)
 	a.cancel()
@@ -296,6 +299,7 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	}
 	local := history(a)
 	require.Len(t, local, 2)
+	require.Equal(t, decision.Comment, local[1].Comment)
 	for _, o := range local {
 		require.Len(t, o.Photos, 1)
 		p := o.Photos[0]
@@ -316,10 +320,11 @@ func exerciseComparison(t *testing.T, postgresDSN string) {
 	}
 	require.NotEmpty(t, legacy.ID)
 	reviewRequest(t, "POST", a.httpBase+"/api/v1/observations", map[string]any{
-		"horse_id": horses[0], "observer_id": "field", "blob_ids": []string{legacy.ID},
+		"horse_id": horses[0], "observer_id": "field", "blob_ids": []string{legacy.ID}, "comment": "У ручья",
 	}, 201, nil)
 	local = history(a)
 	require.Len(t, local, 3)
+	require.Equal(t, "У ручья", local[2].Comment)
 	manual := local[2].Photos
 	require.Len(t, manual, 1)
 	require.Equal(t, legacy.SHA256, manual[0].SHA)

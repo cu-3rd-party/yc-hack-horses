@@ -116,9 +116,9 @@ func (s *Store) CreateObservation(ctx context.Context, o domain.Observation) err
 		return fmt.Errorf("sqlstore: create observation: blob_ids: %w", err)
 	}
 	if _, err := s.exec(ctx,
-		`INSERT INTO observations (id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		o.ID, o.HorseID, o.NodeID, o.ObservedAt.UnixMilli(), o.Location, o.ObserverID, string(blobIDs), o.TraitSnapID, o.Name,
+		`INSERT INTO observations (id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name, comment)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		o.ID, o.HorseID, o.NodeID, o.ObservedAt.UnixMilli(), o.Location, o.ObserverID, string(blobIDs), o.TraitSnapID, o.Name, o.Comment,
 	); err != nil {
 		return fmt.Errorf("sqlstore: create observation %s: %w", o.ID, err)
 	}
@@ -133,9 +133,9 @@ func (s *Store) GetObservation(ctx context.Context, id string) (domain.Observati
 		blobIDs    string
 	)
 	err := s.queryRow(ctx,
-		`SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name
+		`SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name, comment
 		 FROM observations WHERE id = ?`, id,
-	).Scan(&o.ID, &o.HorseID, &o.NodeID, &observedAt, &o.Location, &o.ObserverID, &blobIDs, &o.TraitSnapID, &o.Name)
+	).Scan(&o.ID, &o.HorseID, &o.NodeID, &observedAt, &o.Location, &o.ObserverID, &blobIDs, &o.TraitSnapID, &o.Name, &o.Comment)
 	if err != nil {
 		return domain.Observation{}, notFound("observation", err)
 	}
@@ -152,7 +152,7 @@ func (s *Store) ListObservations(ctx context.Context, horseID string) ([]domain.
 }
 
 func (s *Store) listObservations(ctx context.Context, horseID string, limited bool) ([]domain.Observation, error) {
-	q := `SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name FROM observations`
+	q := `SELECT id, horse_id, node_id, observed_at, location, observer_id, blob_ids, trait_snapshot_id, name, comment FROM observations`
 	var args []any
 	if horseID != "" {
 		q += ` WHERE horse_id = ?`
@@ -174,7 +174,7 @@ func (s *Store) listObservations(ctx context.Context, horseID string, limited bo
 			observedAt int64
 			blobIDs    string
 		)
-		if err := rows.Scan(&o.ID, &o.HorseID, &o.NodeID, &observedAt, &o.Location, &o.ObserverID, &blobIDs, &o.TraitSnapID, &o.Name); err != nil {
+		if err := rows.Scan(&o.ID, &o.HorseID, &o.NodeID, &observedAt, &o.Location, &o.ObserverID, &blobIDs, &o.TraitSnapID, &o.Name, &o.Comment); err != nil {
 			return nil, fmt.Errorf("sqlstore: scan observation: %w", err)
 		}
 		o.ObservedAt = timeFromUnixMilli(observedAt)
