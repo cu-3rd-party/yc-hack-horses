@@ -13,7 +13,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/domain"
+	"github.com/cu3rd/yc-hack-horses/backend/internal/storage"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/fsblob"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/migrate"
 	"github.com/cu3rd/yc-hack-horses/backend/internal/storage/sqlstore"
@@ -30,6 +33,54 @@ import (
 )
 
 const appVersion = "mobile-0.1.0"
+
+// similarDisclaimer — явный дисклеймер ответа поиска похожих (паритет с
+// http-путём, inference.go): fingerprint — это поиск похожих по набору
+// признаков, НЕ биологическая идентичность.
+const similarDisclaimer = "fingerprint — поиск похожих по набору признаков, НЕ биологическая идентичность"
+
+// maxReasonLen ограничивает длину reason, чтобы произвольный текст клиента не
+// раздувал payload события blob.deleted. Лимит держим только на мобильном
+// фасаде: http-путь (DELETE /api/v1/blobs/{sha256}) длину reason НЕ ограничивает.
+// Свести лимиты в один — задача интеграции, вне этого слоя.
+const maxReasonLen = 512
+
+// errInvalidSHA256Prefix — стабильный строковый контракт сообщения об ошибке
+// некорректного sha256. Держим его синхронным с errInvalidSHA256: префикс =
+// весь текст errInvalidSHA256 (обёртка добавляет ": <sha>"). Менять только
+// вместе с мобильным клиентом.
+const errInvalidSHA256Prefix = "mobilebind: invalid sha256"
+
+// errNotFoundPrefix — стабильный строковый контракт сообщения об ошибке
+// «блоб не найден/уже удалён» (аналог 404 в http-пути). Сообщение начинается с
+// этого префикса, поэтому старый мобильный клиент может различать 400/404 по
+// началу строки (err.Error()), не дожидаясь нового биндинга. Держим синхронным
+// с IsNotFound; менять только вместе с мобильным клиентом.
+const errNotFoundPrefix = "mobilebind: blob not found"
+
+// errInvalidSHA256 — некорректный sha256 (аналог 400 в http-пути). Намеренно НЕ
+// экспортируем: gomobile bind превращает package-level переменные в get/set-пары,
+// и тогда мобильный клиент мог бы подменить sentinel и сломать errors.Is.
+// Контракт для клиента — exported helper IsInvalidSHA256 и стабильный префикс
+// сообщения errInvalidSHA256Prefix.
+var errInvalidSHA256 = errors.New(errInvalidSHA256Prefix)
+
+// IsInvalidSHA256 сообщает, является ли ошибка ошибкой некорректного sha256
+// (аналог 400 в http-пути). Экспортируемая функция, а не переменная: sentinel
+// errInvalidSHA256 намеренно неэкспортируем, чтобы клиент не мог его подменить.
+// Для случая «блоб не найден/уже удалён» (аналог 404) используйте IsNotFound.
+func IsInvalidSHA256(err error) bool {
+	return errors.Is(err, errInvalidSHA256)
+}
+
+// IsNotFound сообщает, является ли ошибка ошибкой «не найдено» (аналог 404 в
+// http-пути): неизвестный или уже удалённый блоб, отсутствующее наблюдение и
+// т.п. Симметричен IsInvalidSHA256 — мобильный клиент различает 400/404 по этим
+// двум helper'ам, не прибегая к errors.Is напрямую (storage в биндинг не
+// экспортирован). Плюс сообщение имеет стабильный префикс errNotFoundPrefix.
+func IsNotFound(err error) bool {
+	return errors.Is(err, storage.ErrNotFound)
+}
 
 // coreState — единственный экземпляр ядра на процесс. gomobile не передаёт
 // указатели между языками, поэтому состояние живёт в синглтоне под мьютексом.
@@ -171,8 +222,24 @@ func AppendObservation(payloadJSON string) (string, error) {
 		BlobIDs:    in.BlobIDs,
 	}
 	if err := appendWithProjection(c, domain.EventObservationAdded, o.ID, mustJSON(o),
-		func(tx *sqlstore.Store) error { return tx.CreateObservation(context.Background(), o) }); err != nil {
+		func(tx *sqlstore.Store) error {
+			if err := tx.CreateObservation(context.Background(), o); err != nil {
+				return err
+			}
+			// Фото могло быть удалено раньше: наблюдение создаётся, но сразу
+			// помечается неактуальным (как в http-пути).
+			_, err := tx.InvalidateObservationIfBlobsDeleted(context.Background(), o.ID, o.BlobIDs, "blob deleted")
+			return err
+		}); err != nil {
 		return "", err
+	}
+	// Ответ — из проекции: наблюдение могло быть помечено неактуальным сразу.
+	// Ошибку чтения не глотаем молча: логируем расхождение, но отдаём исходное
+	// значение, чтобы запись не считалась проваленной.
+	if stored, err := c.store.GetObservation(context.Background(), o.ID); err != nil {
+		slog.Warn("mobilebind: read observation after append", "id", o.ID, "err", err)
+	} else {
+		o = stored
 	}
 	return string(mustJSON(o)), nil
 }
@@ -207,6 +274,141 @@ func StoreBlob(data []byte, mimeType string) (string, error) {
 		return "", err
 	}
 	return string(mustJSON(b)), nil
+}
+
+// DeleteBlob мягко удаляет блоб событием blob.deleted (аналог
+// DELETE /api/v1/blobs/{sha256}): строка помечается в проекции, наблюдения с
+// этим фото становятся неактуальными (invalidated), а физический файл удаляется
+// только если на блоб не ссылается ни одно наблюдение. Повторный вызов для уже
+// удалённого/неизвестного блоба — ошибка (в http-пути это 404).
+func DeleteBlob(sha256Hex, reason string) error {
+	mu.Lock()
+	defer mu.Unlock()
+	c, err := current()
+	if err != nil {
+		return err
+	}
+	// Паритет с http-путём: пробелы по краям sha ошибочны только если после
+	// трима значение не является корректным sha256.
+	sha256Hex = strings.TrimSpace(sha256Hex)
+	if !storage.ValidSha256Hex(sha256Hex) {
+		return fmt.Errorf("%w: %s", errInvalidSHA256, sha256Hex)
+	}
+	// Блоб должен существовать и быть не удалённым — иначе удалять нечего
+	// (аналог 404: ошибка несёт storage.ErrNotFound). Сообщению даём стабильный
+	// префикс errNotFoundPrefix, чтобы клиент различал 400/404 по началу строки.
+	if _, err := c.store.GetBlobMeta(context.Background(), sha256Hex); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return fmt.Errorf("%s: %s: %w", errNotFoundPrefix, sha256Hex, err)
+		}
+		return fmt.Errorf("mobilebind: blob %s: %w", sha256Hex, err)
+	}
+	reason = strings.TrimSpace(reason)
+	if r := []rune(reason); len(r) > maxReasonLen {
+		// Усечение может оставить хвостовой пробел, если граница попала на
+		// 512-ю руну-разделитель — повторный TrimSpace его убирает.
+		reason = strings.TrimSpace(string(r[:maxReasonLen]))
+	}
+	now := time.Now().UTC()
+	payload := domain.BlobDeleted{SHA256: sha256Hex, DeletedAt: now, Reason: reason}
+	if err := appendWithProjection(c, domain.EventBlobDeleted, sha256Hex, mustJSON(payload),
+		func(tx *sqlstore.Store) error {
+			_, err := tx.ProjectBlobDeleted(context.Background(), sha256Hex, now, reason)
+			return err
+		}); err != nil {
+		return err
+	}
+	// Файл — после коммита события и проекции (см. storage.PruneBlobs).
+	storage.PruneBlobs(context.Background(), c.store, c.blobs, []string{sha256Hex}, slog.Default())
+	return nil
+}
+
+// GetObservation возвращает JSON одного наблюдения, включая поля инвалидации
+// (invalidated/invalidated_at/invalidation_reason): мобильный UI показывает
+// устаревшие наблюдения отдельно, не удаляя их из журнала.
+func GetObservation(id string) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	c, err := current()
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", fmt.Errorf("mobilebind: observation id required")
+	}
+	o, err := c.store.GetObservation(context.Background(), id)
+	if err != nil {
+		return "", fmt.Errorf("mobilebind: observation %s: %w", id, err)
+	}
+	return string(mustJSON(o)), nil
+}
+
+// ListObservations возвращает JSON-массив наблюдений (при horseID != "" — только
+// по указанной лошади). Неактуальные наблюдения остаются в выдаче вместе с
+// полями инвалидации, чтобы UI мог пометить их как устаревшие.
+func ListObservations(horseID string) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	c, err := current()
+	if err != nil {
+		return "", err
+	}
+	list, err := c.store.ListObservations(context.Background(), horseID)
+	if err != nil {
+		return "", err
+	}
+	if list == nil {
+		list = []domain.Observation{}
+	}
+	return string(mustJSON(list)), nil
+}
+
+// similarResponse — форма ответа поиска похожих: паритет с http-путём
+// (inference.go similarResponse) — query + disclaimer + results.
+type similarResponse struct {
+	Query      string                 `json:"query"`
+	Disclaimer string                 `json:"disclaimer"`
+	Results    []domain.TraitSnapshot `json:"results"`
+}
+
+// FindSimilarObservations — мобильный путь поиска похожих по признакам (аналог
+// GET /api/v1/inference/similar). Идёт через ListSimilarTraitSnapshots, который
+// исключает снимки неактуальных (invalidated) наблюдений: после blob.deleted их
+// вектора в выдачу не попадают. Ответ — та же обёртка, что и в http-пути:
+// {query, disclaimer, results}.
+func FindSimilarObservations(blobID string, limit int) (string, error) {
+	mu.Lock()
+	defer mu.Unlock()
+	c, err := current()
+	if err != nil {
+		return "", err
+	}
+	// Паритет с http getSimilarTraits: пробелы по краям blob_id отбрасываем
+	// до проверки на пустоту.
+	blobID = strings.TrimSpace(blobID)
+	if blobID == "" {
+		return "", fmt.Errorf("mobilebind: blob_id required")
+	}
+	blob, err := c.store.GetBlobByID(context.Background(), blobID)
+	if err != nil {
+		return "", fmt.Errorf("mobilebind: blob %s: %w", blobID, err)
+	}
+	src, err := c.store.FindSnapshotByBlobSHA(context.Background(), blob.SHA256)
+	if err != nil {
+		return "", fmt.Errorf("mobilebind: snapshot for blob %s: %w", blob.SHA256, err)
+	}
+	similar, err := c.store.ListSimilarTraitSnapshots(context.Background(), src.Fingerprint, src.ID, limit)
+	if err != nil {
+		return "", err
+	}
+	if similar == nil {
+		similar = []domain.TraitSnapshot{}
+	}
+	return string(mustJSON(similarResponse{
+		Query:      src.Fingerprint,
+		Disclaimer: similarDisclaimer,
+		Results:    similar,
+	})), nil
 }
 
 // NodeStatus возвращает JSON-статус локальной ноды (id, роль, число событий, часы).
