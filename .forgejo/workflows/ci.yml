@@ -233,14 +233,3 @@ jobs:
           secrets-json: ${{ toJSON(secrets) }}
           variables-json: ${{ toJSON(vars) }}
           delivery-token: ${{ secrets.SELF_SERVICE_DELIVERY_TOKEN }}
-      - name: Propose self-service deployment (data)
-        if: needs.changes.outputs.data == 'true'
-        uses: https://git.cu3rd.ru/cu3rd/self-service/actions/deploy@master
-        with:
-          project: yc-hack-horses
-          environment: prod
-          app: data
-          tag: ${{ github.sha }}
-          secrets-json: ${{ toJSON(secrets) }}
-          variables-json: ${{ toJSON(vars) }}
-          delivery-token: ${{ secrets.SELF_SERVICE_DELIVERY_TOKEN }}
