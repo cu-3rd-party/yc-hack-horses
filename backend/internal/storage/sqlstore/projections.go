@@ -275,7 +275,7 @@ func (s *Store) UpsertBlobAt(ctx context.Context, b domain.Blob, registeredAt ti
 		`INSERT INTO blobs (id, sha256, mime_type, size, created_at, registered_at) VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (sha256) DO UPDATE SET deleted_at = 0, delete_reason = '',
 		     mime_type = excluded.mime_type, size = excluded.size,
-		     registered_at = excluded.registered_at
+		     registered_at = excluded.registered_at, pruned_at = 0
 		 WHERE blobs.deleted_at != 0`,
 		b.ID, b.SHA256, b.MimeType, b.Size, timeNow().UnixMilli(), registeredAt.UnixMilli(),
 	)
@@ -592,6 +592,14 @@ func (s *Store) InvalidateObservationIfBlobsDeleted(ctx context.Context, observa
 // BlobReferenced сообщает, ссылается ли на блоб хоть одно наблюдение:
 // observations.blob_ids (запись — blobs.id или legacy sha256) или
 // observation_photos.sha256. По этим ссылкам файл нельзя удалять физически.
+//
+// Стоимость: проверка выполняется отдельным COUNT-запросом с LIKE-условием по
+// CAST(blob_ids AS TEXT) плюс COUNT по observation_photos — на больших таблицах
+// это полный скан, индекса на JSON-массив нет. Это осознанный компромисс:
+// правка ужесточена ядром (loop-1), а более дешёвая LIKE/EXISTS-версия (или
+// отдельная таблица ссылок blob->observation с индексом) придёт с ядром и
+// интеграционным слоем — здесь метод не переписываем, только фиксируем цену
+// и что каждый вызов из PruneBlobs стоит этих сканов (их два на блоб).
 func (s *Store) BlobReferenced(ctx context.Context, sha string) (bool, error) {
 	patterns, err := s.blobRefPatterns(ctx, sha)
 	if err != nil {

@@ -369,11 +369,15 @@ func (a *App) Run(ctx context.Context) error {
 			slog.Warn("mdns discovery disabled", "err", err)
 		}
 	}
+	a.startBlobReaper()
 
 	select {
 	case err := <-errCh:
 		if !errors.Is(err, http.ErrServerClosed) {
 			a.stopBackground()
+			// Дожидаемся фоновых горутин перед выходом: closed DB + работающий
+			// рипер/синк — источник паники и потерянных записей при остановке.
+			a.doneW.Wait()
 			return err
 		}
 		return nil
@@ -382,13 +386,26 @@ func (a *App) Run(ctx context.Context) error {
 	slog.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := a.srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("app: shutdown: %w", err)
-	}
-	if err := <-errCh; !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
+	shutdownErr := a.srv.Shutdown(shutdownCtx)
+	// Останавливаем фоновые контуры и ждём горутины в любом случае, даже если
+	// Shutdown вернул ошибку: closed DB + работающий рипер/синк — источник
+	// паники и потерянных записей при остановке.
 	a.stopBackground()
+	a.doneW.Wait()
+	// errCh читаем только при успешном Shutdown. Если Shutdown не уложился в
+	// таймаут, сервер мог не остановиться, и ListenAndServe ещё не вернулся —
+	// безусловное чтение errCh подвесило бы Run. При ошибке Shutdown она и так
+	// информативнее ошибки сервера, поэтому сразу её и возвращаем.
+	var serveErr error
+	if shutdownErr == nil {
+		serveErr = <-errCh
+	}
+	if shutdownErr != nil {
+		return fmt.Errorf("app: shutdown: %w", shutdownErr)
+	}
+	if !errors.Is(serveErr, http.ErrServerClosed) {
+		return serveErr
+	}
 	if err := a.store.Close(); err != nil {
 		return fmt.Errorf("app: close storage: %w", err)
 	}
@@ -472,6 +489,25 @@ func (a *App) startDiscovery() error {
 		})
 	}()
 	return nil
+}
+
+// startBlobReaper запускает фоновый рипер файлов удалённых блобов: при старте
+// и далее с фиксированным интервалом он прогоняет мягко удалённые блобы через
+// storage.PruneBlobs. Закрывает дыру, когда нода упала между коммитом проекции
+// blob.deleted и физическим удалением файла (повторного события не будет —
+// журнал дедуплицируется по node_id+sequence). Локальные блобы по-прежнему
+// чистятся сразу в HTTP-хендлере; рипер — страховка от крэша.
+func (a *App) startBlobReaper() {
+	reaperCtx, cancel := context.WithCancel(context.Background())
+	a.addStop(cancel)
+	// sqlstore.Store сам реализует DeletedBlobLister/BlobReferencer/…:
+	// SQL остаётся в sqlstore, контрактный пакет storage — только интерфейсы.
+	a.doneW.Add(1)
+	go func() {
+		defer a.doneW.Done()
+		storage.RunBlobReaper(reaperCtx, a.store, a.store, a.blobs, slog.Default())
+	}()
+	slog.Info("blob reaper started", "interval", storage.BlobReaperInterval.String())
 }
 
 // syncStatsSnapshot — значение для /api/v1/node (nil-безопасно).
