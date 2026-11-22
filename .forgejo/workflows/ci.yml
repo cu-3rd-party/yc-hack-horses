@@ -181,12 +181,15 @@ jobs:
           echo "smoke started"
           docker exec "$smoke" mkdir -p /data/sub /data/.hidden
           docker exec "$smoke" sh -c 'echo hi > /data/sub/f.txt; echo secret > /data/.hidden/token'
-          code=$(docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/ 2>&1 | awk '/^  HTTP/{print $2}' | tail -1)
+          # 403-проверка ниже: wget на 403 выходит с кодом 1 — пайп под pipefail
+          # унаследует её и set -e молча убьёт скрипт, поэтому wget в подкоманду
+          # с || true: код ответа выдираем из заголовков.
+          code=$( (docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/ 2>&1 || true) | awk '/^  HTTP/{print $2}' | tail -1)
           echo "index code=$code"
           [ "$code" = 200 ] || { echo "index code $code"; exit 1; }
           docker exec "$smoke" wget -q -O - http://127.0.0.1:8080/ | grep -q 'sub/' || { echo 'no autoindex'; exit 1; }
           echo "autoindex ok"
-          code=$(docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/.hidden/token 2>&1 | awk '/^  HTTP/{print $2}' | tail -1)
+          code=$( (docker exec "$smoke" wget -q -O /dev/null -S http://127.0.0.1:8080/.hidden/token 2>&1 || true) | awk '/^  HTTP/{print $2}' | tail -1)
           echo "dotfile code=$code"
           [ "$code" = 403 ] || { echo "dotfile code $code"; exit 1; }
           echo "dotfile ok"
