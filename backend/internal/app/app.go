@@ -17,6 +17,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"image"
 	"log/slog"
 	"net"
 	"net/http"
@@ -286,25 +287,37 @@ func New(cfg *config.Config) (*App, error) {
 }
 
 // buildHorseID собирает comparison.Analyzer пайплайна horseid (HANDOFF_GO.md):
-// детектор боксов YOLO11s (модуль M2), оценщик позы ViTPose+ (модуль M3) и
-// эмбеддер DINOv2-B + ArcFace (модуль M5). Возвращает анализатор и функцию
-// остановки ресурсов.
-//
-// Конструктор оценщика позы уже влит (vitpose.New). Конструкторы детектора
-// боксов (реализует horseid.BoxDetector поверх ONNX-сессии YOLO11s и класса 17
-// horse) и эмбеддера (реализует horseid.Embedder поверх DINOv2-B и проекций
-// ArcFace) появятся в волне 2; до их мёржа пайплайн не собирается, и функция
-// возвращает ошибку с версией контракта. После мёржа заменить тело на:
-//
-//	boxes := horseid.NewBoxDetector(cfg.Inference.ModelPath, cfg.Inference.RuntimeLib)
-//	pose := vitpose.New(cfg.Inference.RuntimeLib, reidDir, modelassets.VitPoseONNX)
-//	embed := horseid.NewEmbedder(reidDir)
-//	return comparison.NewHorseAnalyzer(boxes, pose, embed), func() { _ = pose.Close() }, nil
+// детектор боксов YOLO11s, оценщик позы ViTPose+ и эмбеддер DINOv2-B + ArcFace.
+// Возвращает анализатор и функцию остановки ресурсов.
 func buildHorseID(cfg *config.Config, reidDir string) (comparison.Analyzer, func(), error) {
-	// Оценщик позы ViTPose+ нужен пайплайну horseid: конструктор модели.
+	// Детектор боксов: YOLO11s поверх onnxruntime (адаптер в пакете yolo).
+	detector := yolo.New(yolo.Config{
+		ModelPath:      cfg.Inference.ModelPath,
+		RuntimeLibPath: cfg.Inference.RuntimeLib,
+		ReIDModelDir:   reidDir,
+	})
 	pose := vitpose.New(cfg.Inference.RuntimeLib, reidDir, modelassets.VitPoseONNX)
-	closeAll := func() { _ = pose.Close() }
-	return nil, closeAll, fmt.Errorf("horseid: детектор боксов YOLO11s и эмбеддер ArcFace ещё не влиты (контракт %s)", horseid.Version)
+	embed, err := horseid.OpenArcEmbedder(reidDir)
+	if err != nil {
+		_ = pose.Close()
+		return nil, func() {}, fmt.Errorf("horseid: эмбеддер: %w", err)
+	}
+	closeAll := func() {
+		embed.Close()
+		_ = pose.Close()
+		_ = detector.Close()
+	}
+	// ViTPose-эстиматор отвечает Estimate(ctx,img,box); интерфейсу нужен
+	// EstimatePose(img,box) — тонкий адаптер с фиксированным контекстом.
+	poser := vitposeAdapter{est: pose}
+	return comparison.NewHorseAnalyzer(detector, poser, embed), closeAll, nil
+}
+
+// vitposeAdapter сводит сигнатуру vitpose.Estimator к horseid.PoseEstimator.
+type vitposeAdapter struct{ est *vitpose.Estimator }
+
+func (a vitposeAdapter) EstimatePose(img image.Image, box [4]float64) ([]horseid.KeyPoint, error) {
+	return a.est.Estimate(context.Background(), img, box)
 }
 
 // blobStatsSnapshot — срез состояния блобов для /api/v1/node: сколько ссылок
