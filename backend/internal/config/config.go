@@ -269,6 +269,7 @@ func (c *Config) Validate() error {
 	switch c.Inference.Engine {
 	case "unavailable", "reference":
 	case "yolo":
+		// An empty model path is resolved by app.New using the installed detector files.
 		if c.Inference.RuntimeLib == "" {
 			return fmt.Errorf("config: inference.engine yolo: требуется inference.runtime_lib")
 		}
