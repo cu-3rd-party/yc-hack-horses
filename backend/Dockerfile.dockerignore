@@ -10,6 +10,9 @@
 !app/package.json
 !app/package-lock.json
 !app/index.html
+!app/gallery.html
+!app/observations.html
+!app/system.html
 !app/tsconfig.json
 !app/vite.config.ts
 !app/src/**
