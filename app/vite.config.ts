@@ -4,6 +4,17 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   base: './',
+  // MPA (ADR-0015): отдельные html-входы на каждую страницу.
+  build: {
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        gallery: 'gallery.html',
+        observations: 'observations.html',
+        system: 'system.html',
+      },
+    },
+  },
   server: { proxy: { '/api/v1': { target: 'http://127.0.0.1:8080' } } },
   plugins: [
     react(),

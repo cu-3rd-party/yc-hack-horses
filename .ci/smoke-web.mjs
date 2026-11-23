@@ -22,6 +22,16 @@ for (let attempt = 0; ; attempt++) {
 
 const html = await (await get('/', /text\/html/)).text();
 assert.match(html, /<title>ЛошID/);
+// MPA (ADR-0015): остальные страницы — отдельные html-входы.
+for (const page of ['gallery.html', 'observations.html', 'system.html']) {
+  const pageHtml = await (await get('/' + page, /text\/html/)).text();
+  assert.match(pageHtml, /<title>ЛошID/, page);
+  for (const [pattern, mime] of [[/src="([^"]+\.js)"/, /javascript/], [/href="([^"]+\.css)"/, /text\/css/]]) {
+    const asset = pageHtml.match(pattern)?.[1];
+    assert.ok(asset, 'Expected a built asset on ' + page + ': ' + pattern);
+    await get(asset, mime);
+  }
+}
 for (const [pattern, mime] of [[/src="([^"]+\.js)"/, /javascript/], [/href="([^"]+\.css)"/, /text\/css/]]) {
   const asset = html.match(pattern)?.[1];
   assert.ok(asset, 'Expected a built asset: ' + pattern);

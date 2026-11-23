@@ -166,6 +166,7 @@ small {
   color: var(--muted);
 }
 .nav-group button,
+.nav-group a,
 .sidebar-help {
   position: relative;
   display: flex;
@@ -180,12 +181,14 @@ small {
   color: var(--muted);
 }
 .nav-group button:hover:enabled,
+.nav-group a:hover,
 .sidebar-help:hover,
 .sidebar-toggle:hover {
   background: var(--soft);
   color: var(--ink);
 }
-.nav-group button[aria-current] {
+.nav-group button[aria-current],
+.nav-group a[aria-current] {
   background: var(--soft);
   color: var(--action);
   font-weight: 600;
@@ -211,10 +214,12 @@ small {
   .brand strong,
   .nav-group h2,
   .nav-group button span,
+  .nav-group a span,
   .sidebar-help span {
     display: none;
   }
   .nav-group button,
+  .nav-group a,
   .sidebar-help {
     margin-inline: auto;
     width: 40px;

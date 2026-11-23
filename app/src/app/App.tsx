@@ -1,139 +1,56 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  Activity,
-  Binoculars,
-  BookOpen,
-  ChevronLeft,
-  ChevronRight,
-  CircleHelp,
-  createLucideIcon,
-  LoaderCircle,
-  RefreshCw,
-  ScanLine,
-  Settings2,
-} from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import { useDemo } from '../journal/mode';
 import { useNotebook } from '../journal/use-journal';
 import { ReviewPage, type PhotoBatch } from '../pages/review';
 import { Gallery } from '../pages/gallery';
 import { ObservationLog } from '../pages/observations';
-import { Dashboard, Settings, Sync } from '../pages/system';
+import { SystemPage } from '../pages/system';
 import { Modal } from '../shared/ui/journal-ui';
+import { Sidebar } from './sidebar';
 
-// Horse Head from Lucide Lab, using the same SVG defaults as the sidebar icons.
-const HorseIcon = createLucideIcon('horse-head', [
-  ['path', { d: 'M11.5 12H11', key: 'eye' }],
-  ['path', {
-    d: 'M5 15a4 4 0 0 0 4 4h7.8l.3.3a3 3 0 0 0 4-4.46L12 7c0-3-1-5-1-5S8 3 8 7c-4 1-6 3-6 3',
-    key: 'head',
-  }],
-  ['path', { d: 'M6.14 17.8S4 19 2 22', key: 'neck' }],
-]);
+// MPA-навигация (ADR-0015): активная страница задаётся в html-входе через
+// <body data-page="...">, App остаётся общим каркасом (сайдбар + провайдеры).
+const pages = ['review', 'gallery', 'observations', 'system'] as const;
+type Page = (typeof pages)[number];
+function currentPage(): Page {
+  const raw = document.body.dataset.page;
+  return (pages as readonly string[]).includes(raw ?? '') ? (raw as Page) : 'review';
+}
 
-const sections = [
-  {
-    label: 'Полевой журнал',
-    items: [
-      { key: 'review', label: 'Распознавание', icon: ScanLine },
-      { key: 'gallery', label: 'Особи', icon: HorseIcon },
-      { key: 'log', label: 'Наблюдения', icon: BookOpen },
-    ],
-  },
-  {
-    label: 'Рабочая станция',
-    items: [
-      { key: 'dashboard', label: 'Сводка', icon: Activity },
-      { key: 'sync', label: 'Синхронизация', icon: RefreshCw },
-      { key: 'settings', label: 'Настройки', icon: Settings2 },
-    ],
-  },
-] as const;
-type Route = (typeof sections)[number]['items'][number]['key'];
 export default function App() {
   const demo = useDemo();
-  const [route, setRoute] = useState<Route>('review');
-  return <Workspace key={String(demo)} demo={demo} route={route} setRoute={setRoute} />;
+  return <Workspace key={String(demo)} demo={demo} page={currentPage()} />;
 }
-function Workspace({
-  demo,
-  route,
-  setRoute,
-}: {
-  demo: boolean;
-  route: Route;
-  setRoute: (route: Route) => void;
-}) {
+
+function Workspace({ demo, page }: { demo: boolean; page: Page }) {
   const [help, setHelp] = useState(false),
     [collapsed, setCollapsed] = useState(false),
-    [processing, setProcessing] = useState(false),
-    [batch, setBatch] = useState<PhotoBatch | null>(null),
-    [logId, setLogId] = useState<string | undefined>();
+    [, setProcessing] = useState(false),
+    [batch, setBatch] = useState<PhotoBatch | null>(null);
   const main = useRef<HTMLElement>(null),
     { data: book, error, refetch } = useNotebook();
   useEffect(() => {
     main.current?.scrollTo(0, 0);
-  }, [route, book?.review?.id]);
+  }, [page, book?.review?.id]);
+  // Переход к наблюдению со страницы «Распознавание» — обычная навигация
+  // на observations.html с якорем-идентификатором записи.
+  const openLog = (id?: string) => {
+    window.location.href = '/observations.html' + (id ? '#' + encodeURIComponent(id) : '');
+  };
   return (
     <div className="shell">
-      <aside className="sidebar" data-collapsed={collapsed}>
-        <div className="sidebar-head">
-          <button
-            className="brand"
-            title="ЛошID — распознавание"
-            aria-label="ЛошID — распознавание"
-            onClick={() => setRoute('review')}
-          >
-            <span className="brand-icon">
-              <Binoculars size={21} strokeWidth={1.7} />
-            </span>
-            <strong>ЛошID</strong>
-          </button>
-          <button
-            className="sidebar-toggle"
-            aria-controls="journal-nav"
-            aria-expanded={!collapsed}
-            aria-label={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
-            title={collapsed ? 'Развернуть меню' : 'Свернуть меню'}
-            onClick={() => setCollapsed(!collapsed)}
-          >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </button>
-        </div>
-        <nav id="journal-nav" aria-label="Навигация">
-          {sections.map((section) => (
-            <div className="nav-group" key={section.label}>
-              <h2>{section.label}</h2>
-              {section.items.map(({ key, label, icon: Icon }) => (
-                <button
-                  key={key}
-                  title={label}
-                  aria-label={label}
-                  disabled={processing}
-                  aria-current={key === route ? 'page' : undefined}
-                  onClick={() => setRoute(key)}
-                >
-                  <Icon size={18} strokeWidth={1.7} />
-                  <span>{label}</span>
-                  {key === 'sync' && !!book?.pending.length && <b>{book.pending.length}</b>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <button
-          className="sidebar-help"
-          title="Справка"
-          aria-label="Справка"
-          onClick={() => setHelp(true)}
-        >
-          <CircleHelp size={18} strokeWidth={1.7} />
-          <span>Справка</span>
-        </button>
-      </aside>
+      <Sidebar
+        page={page}
+        pending={book?.pending.length ?? 0}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        onHelp={() => setHelp(true)}
+      />
       <main className="work" ref={main}>
         <div className="content">
-          {route === 'settings' ? (
-            <Settings book={book} />
+          {page === 'system' ? (
+            <SystemPage book={book} error={error} refetch={() => void refetch()} />
           ) : error ? (
             <div className="empty" role="alert">
               {error.message || 'Не удалось открыть журнал.'}{' '}
@@ -147,28 +64,25 @@ function Workspace({
             </p>
           ) : (
             <>
-              {route === 'review' && (
+              {page === 'review' && (
                 <ReviewPage
                   batch={batch}
                   setBatch={setBatch}
                   onBusyChange={setProcessing}
                   book={book}
-                  openLog={(id) => {
-                    setLogId(id);
-                    setRoute('log');
-                  }}
+                  openLog={openLog}
                 />
               )}
-              {route === 'gallery' && <Gallery book={book} />}
-              {route === 'log' && (
+              {page === 'gallery' && <Gallery book={book} />}
+              {page === 'observations' && (
                 <ObservationLog
                   book={book}
-                  initialId={logId}
-                  onDismiss={() => setLogId(undefined)}
+                  initialId={decodeURIComponent(window.location.hash.replace(/^#/, '')) || undefined}
+                  onDismiss={() =>
+                    history.replaceState(null, '', window.location.pathname + window.location.search)
+                  }
                 />
               )}
-              {route === 'dashboard' && <Dashboard book={book} />}
-              {route === 'sync' && <Sync book={book} />}
             </>
           )}
         </div>

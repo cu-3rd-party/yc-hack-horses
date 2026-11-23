@@ -2,8 +2,8 @@ import { ModelPanel, useModels } from './models';
 import { setDemo, useDemo } from '../journal/mode';
 import { desktop } from '../journal/node';
 import { version } from '../../package.json';
-import { useState } from 'react';
-import { Activity, Database, Images, ListChecks, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Activity, Database, Images, ListChecks, LoaderCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import type { Notebook } from '../journal/types';
 import { useCommand } from '../journal/use-journal';
 import { Heading, Modal, Toggle, useNotice } from '../shared/ui/journal-ui';
@@ -302,4 +302,49 @@ export function Settings({ book }: { book?: Notebook }) {
       )}
     </>
   );
+}
+
+// MPA (ADR-0015): страница «Система» собирает бывшие вкладки SPA (Сводка/
+// Синхронизация/Настройки); активная вкладка — якорь в location.hash,
+// клики по сайдбару обновляют хэш без перезагрузки.
+const tabs = ['dashboard', 'sync', 'settings'] as const;
+type Tab = (typeof tabs)[number];
+export function SystemPage({
+  book,
+  error,
+  refetch,
+}: {
+  book?: Notebook;
+  error: Error | null;
+  refetch: () => void;
+}) {
+  const [tab, setTab] = useState<Tab>(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    return (tabs as readonly string[]).includes(hash) ? (hash as Tab) : 'dashboard';
+  });
+  useEffect(() => {
+    const onHash = () => {
+      const hash = window.location.hash.replace(/^#/, '');
+      if ((tabs as readonly string[]).includes(hash)) setTab(hash as Tab);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  if (tab === 'settings') return <Settings book={book} />;
+  if (error)
+    return (
+      <div className="empty" role="alert">
+        {error.message || 'Не удалось открыть журнал.'}{' '}
+        <button className="text-link" onClick={refetch}>
+          Повторить
+        </button>
+      </div>
+    );
+  if (!book)
+    return (
+      <p className="empty">
+        <LoaderCircle className="spin" /> Открываем журнал…
+      </p>
+    );
+  return tab === 'sync' ? <Sync book={book} /> : <Dashboard book={book} />;
 }

@@ -75,7 +75,16 @@ func NewRouter(d Deps) http.Handler {
 
 	if d.WebDir != "" {
 		files := http.FileServer(http.Dir(d.WebDir))
-		for _, route := range []string{"/", "/assets/{file}", "/pdfjs/{group}/{file}", "/photos/{file}", "/licenses/{file}"} {
+		// MPA (ADR-0015): каждая страница — отдельный html-вход в корне dist.
+		// Маршруты перечислены явно, чтобы не перекрыть /health, /readyz,
+		// /docs и /api (chi: статические маршруты приоритетнее параметров,
+		// но явный список безопаснее и 404 без SPA-fallback сохраняется).
+		routes := []string{
+			"/",
+			"/gallery.html", "/observations.html", "/system.html",
+			"/assets/{file}", "/pdfjs/{group}/{file}", "/photos/{file}", "/licenses/{file}",
+		}
+		for _, route := range routes {
 			r.Get(route, files.ServeHTTP)
 			r.Head(route, files.ServeHTTP)
 		}

@@ -39,8 +39,10 @@ function openJournal() {
     },
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // MPA (ADR-0015): разрешаем навигацию только внутри journal://app
+  // (между html-входами), внешние схемы и хосты блокируем.
   win.webContents.on('will-navigate', (event, url) => {
-    if (url !== startURL) event.preventDefault();
+    if (!url.startsWith(startURL)) event.preventDefault();
   });
   win.loadURL(startURL);
 }
@@ -70,7 +72,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('image:preview', async (event, bytes) => {
     if (
-      event.senderFrame?.url !== startURL ||
+      !event.senderFrame?.url.startsWith(startURL) ||
       process.platform !== 'darwin' ||
       !(bytes instanceof Uint8Array)
     ) {
