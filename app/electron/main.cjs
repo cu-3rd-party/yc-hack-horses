@@ -7,6 +7,27 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const run = promisify(execFile);
 const startURL = 'journal://app/';
+// Явный allowlist html-входов MPA (ADR-0015): проверка источника IPC —
+// точный allowlist путей (origin/путь, не префикс URL — PR-ревью #35).
+// Якоря (system.html#sync) не влияют: сравнивается pathname.
+// Защита от path traversal живёт в protocol.handle ниже
+// (decodeURIComponent → path.resolve → префикс на root+sep); will-navigate
+// её не дублирует и не покрывает редиректы.
+const entryPaths = new Set([
+  '/',
+  '/index.html',
+  '/gallery.html',
+  '/observations.html',
+  '/system.html',
+]);
+function isAppPage(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.host === 'app' && entryPaths.has(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
 // Хост локальной ноды (ADR-0014): в пакете спавнит забандленный бинарь и
 // проходит enrollment; в дев-режиме (npm start) no-op — старый поток.
 protocol.registerSchemesAsPrivileged([
@@ -72,7 +93,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('image:preview', async (event, bytes) => {
     if (
-      !event.senderFrame?.url.startsWith(startURL) ||
+      !isAppPage(event.senderFrame?.url ?? '') ||
       process.platform !== 'darwin' ||
       !(bytes instanceof Uint8Array)
     ) {
