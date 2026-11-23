@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cu3rd/yc-hack-horses/backend/internal/comparison"
@@ -74,14 +75,16 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 
 	if d.WebDir != "" {
-		files := http.FileServer(http.Dir(d.WebDir))
+		files := withCachePolicy(http.FileServer(http.Dir(d.WebDir)))
 		// MPA (ADR-0015): каждая страница — отдельный html-вход в корне dist.
 		// Маршруты перечислены явно, чтобы не перекрыть /health, /readyz,
 		// /docs и /api (chi: статические маршруты приоритетнее параметров,
 		// но явный список безопаснее и 404 без SPA-fallback сохраняется).
+		// /index.html — прямые запросы/закладки на имя vite-входа, в dev-сервере
+		// он существует, поэтому и здесь отдаётся (PR-ревью #35).
 		routes := []string{
 			"/",
-			"/gallery.html", "/observations.html", "/system.html",
+			"/index.html", "/gallery.html", "/observations.html", "/system.html",
 			"/assets/{file}", "/pdfjs/{group}/{file}", "/photos/{file}", "/licenses/{file}",
 		}
 		for _, route := range routes {
@@ -132,6 +135,23 @@ func NewRouter(d Deps) http.Handler {
 	r.NotFound(notFoundJSON)
 	r.MethodNotAllowed(methodNotAllowedJSON)
 	return r
+}
+
+// withCachePolicy — обёртка FileServer с Cache-Control (PR-ревью #35):
+// html без кэша — эвристическое кэширование html после релиза ссылается на
+// старые hashed-имена в /assets/ → 404 до принудительного refresh;
+// /assets/{file} — контентные хэши в имени, иммутабельны. Остальная статика
+// (pdfjs/photos/licenses) — как раньше, только Last-Modified.
+func withCachePolicy(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/assets/"):
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		case r.URL.Path == "/" || strings.HasSuffix(r.URL.Path, ".html"):
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func requestLogger(next http.Handler) http.Handler {
