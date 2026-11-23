@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   Activity,
   Binoculars,
@@ -71,17 +72,29 @@ function activeKey(page: string, hash: string): Route | null {
 export function Sidebar({
   page,
   pending,
+  processing,
   collapsed,
   setCollapsed,
   onHelp,
 }: {
   page: string;
   pending: number;
+  // processing: идёт пакетная обработка на странице «Распознавание» — уход
+  // на другую страницу сбросит состояние, поэтому ссылки блокируются.
+  processing: boolean;
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
   onHelp: () => void;
 }) {
-  const active = activeKey(page, window.location.hash);
+  // Активный ключ пересчитывается и на hashchange: под-вкладки «Системы» —
+  // якоря одного документа, SystemPage — sibling, поэтому подписка здесь.
+  const [hash, setHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const active = activeKey(page, hash);
   return (
     <aside className="sidebar" data-collapsed={collapsed}>
       <div className="sidebar-head">
@@ -119,6 +132,14 @@ export function Sidebar({
                 aria-label={label}
                 aria-current={key === active ? 'page' : undefined}
                 className={key === active ? 'active' : undefined}
+                onClick={(event) => {
+                  // Во время обработки блокируем только уход на другой
+                  // документ: якорные под-вкладки system.html перезагрузки
+                  // не делают и состояние не теряют.
+                  const target = new URL(hrefs[key], window.location.href);
+                  if (processing && target.pathname !== window.location.pathname)
+                    event.preventDefault();
+                }}
               >
                 <Icon size={18} strokeWidth={1.7} />
                 <span>{label}</span>

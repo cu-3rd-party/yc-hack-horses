@@ -26,7 +26,7 @@ export default function App() {
 function Workspace({ demo, page }: { demo: boolean; page: Page }) {
   const [help, setHelp] = useState(false),
     [collapsed, setCollapsed] = useState(false),
-    [, setProcessing] = useState(false),
+    [processing, setProcessing] = useState(false),
     [batch, setBatch] = useState<PhotoBatch | null>(null);
   const main = useRef<HTMLElement>(null),
     { data: book, error, refetch } = useNotebook();
@@ -43,6 +43,7 @@ function Workspace({ demo, page }: { demo: boolean; page: Page }) {
       <Sidebar
         page={page}
         pending={book?.pending.length ?? 0}
+        processing={processing}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
         onHelp={() => setHelp(true)}
