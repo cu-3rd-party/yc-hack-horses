@@ -20,23 +20,25 @@ for (let attempt = 0; ; attempt++) {
   }
 }
 
+// Каждый собранный ассет страницы, а не только первый (PR-ревью #35):
+// matchAll ловит дополнительные чанки/файлы css — их 404 раньше проходил мимо.
+async function checkPageAssets(pageHtml, what) {
+  for (const [pattern, mime] of [[/src="([^"]+\.js)"/g, /javascript/], [/href="([^"]+\.css)"/g, /text\/css/]]) {
+    const assets = [...pageHtml.matchAll(pattern)].map((match) => match[1]);
+    assert.ok(assets.length, 'Expected a built asset on ' + what + ': ' + pattern);
+    for (const asset of assets) await get(asset, mime);
+  }
+}
+
 const html = await (await get('/', /text\/html/)).text();
 assert.match(html, /<title>ЛошID/);
 // MPA (ADR-0015): остальные страницы — отдельные html-входы.
-for (const page of ['gallery.html', 'observations.html', 'system.html']) {
+for (const page of ['index.html', 'gallery.html', 'observations.html', 'system.html']) {
   const pageHtml = await (await get('/' + page, /text\/html/)).text();
   assert.match(pageHtml, /<title>ЛошID/, page);
-  for (const [pattern, mime] of [[/src="([^"]+\.js)"/, /javascript/], [/href="([^"]+\.css)"/, /text\/css/]]) {
-    const asset = pageHtml.match(pattern)?.[1];
-    assert.ok(asset, 'Expected a built asset on ' + page + ': ' + pattern);
-    await get(asset, mime);
-  }
+  await checkPageAssets(pageHtml, page);
 }
-for (const [pattern, mime] of [[/src="([^"]+\.js)"/, /javascript/], [/href="([^"]+\.css)"/, /text\/css/]]) {
-  const asset = html.match(pattern)?.[1];
-  assert.ok(asset, 'Expected a built asset: ' + pattern);
-  await get(asset, mime);
-}
+await checkPageAssets(html, '/');
 await get('/pdfjs/wasm/openjpeg.wasm', /application\/wasm/);
 await get('/photos/single.jpg', /image\/jpeg/);
 await get('/health', /application\/json/);
