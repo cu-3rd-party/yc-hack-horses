@@ -135,7 +135,9 @@ jobs:
     name: mobile (android APK)
     runs-on: homelab-docker
     container: ghcr.io/catthehacker/ubuntu:act-24.04
-    options: --cpus 2 --memory 4g
+    # RN-сборка (gradle JVM 2G + clang-компиляция hermes/codegen C++) в 4g ловит
+    # cgroup OOM — «Gradle build daemon disappeared». 6g + docker_dind 8g хватает.
+    options: --cpus 2 --memory 6g
     steps:
       - uses: actions/checkout@v4
         with:
@@ -162,8 +164,12 @@ jobs:
           npm ci --maxsockets=4 --cache ~/.npm
           npx expo prebuild -p android --no-install
           cd android
-          # Gradle-демон в контейнере с 4g лимитом падает OOM — строгий heap и --no-daemon
-          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx2048m
+          # ninja параллелит по числу ядер хоста и строит все 4 ABI — десятки
+          # форкнутых clang++ роняют cgroup по памяти (killed java, "Gradle build
+          # daemon disappeared"). Строим arm64 (тестовый APK) и ограничиваем
+          # воркеры лимитом --cpus 2.
+          ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs=-Xmx2048m \
+            -Dorg.gradle.workers.max=2 -PreactNativeArchitectures=arm64-v8a
       - uses: actions/upload-artifact@v3
         with:
           name: mobile-apk
