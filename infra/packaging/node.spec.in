@@ -20,6 +20,7 @@ Source0:        node
 Source1:        node.example.yaml
 Source2:        libonnxruntime.so.1.31.1
 Source3:        yc-hack-horses-node.service
+Source4:        migrations.tar.gz
 
 %description
 Локальная нода yc-hack-horses: YOLO-детекция + reid-распознавание лошадей
@@ -38,6 +39,9 @@ install -D -m 0644 %{SOURCE2} %{buildroot}%{_libdir}/yc-hack-horses/libonnxrunti
 ln -s libonnxruntime.so.1.31.1 %{buildroot}%{_libdir}/yc-hack-horses/libonnxruntime.so
 install -D -m 0644 %{SOURCE1} %{buildroot}%{_sysconfdir}/yc-hack-horses/node.example.yaml
 install -D -m 0644 %{SOURCE3} %{buildroot}%{_unitdir}/yc-hack-horses.service
+# SQL-миграции — в /usr/share; юнит задаёт MIGRATIONS_DIR на этот каталог.
+mkdir -p %{buildroot}%{_datadir}/yc-hack-horses
+tar -xzf %{SOURCE4} -C %{buildroot}%{_datadir}/yc-hack-horses
 
 %files
 %dir %{_sysconfdir}/yc-hack-horses
@@ -45,5 +49,6 @@ install -D -m 0644 %{SOURCE3} %{buildroot}%{_unitdir}/yc-hack-horses.service
 %{_libdir}/yc-hack-horses/
 %config(noreplace) %{_sysconfdir}/yc-hack-horses/node.example.yaml
 %{_unitdir}/yc-hack-horses.service
+%{_datadir}/yc-hack-horses/
 
 %changelog

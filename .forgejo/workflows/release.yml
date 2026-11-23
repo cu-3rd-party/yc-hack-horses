@@ -65,6 +65,8 @@ jobs:
           tar xzf artifact/backend-linux-amd64.tar.gz -C artifact
           cp artifact/node rpmbuild/SOURCES/
           cp backend/config.example.yaml rpmbuild/SOURCES/node.example.yaml
+          # Миграции обязательны: нода накатывает SQL при старте из MIGRATIONS_DIR.
+          tar -C backend -czf rpmbuild/SOURCES/migrations.tar.gz migrations
           curl -fsSL -o /tmp/ort.nupkg https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.1/microsoft.ml.onnxruntime.1.31.1.nupkg
           python3 - <<'EOF'
           import zipfile, shutil

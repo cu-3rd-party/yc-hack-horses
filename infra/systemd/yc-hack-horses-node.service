@@ -14,6 +14,8 @@ StateDirectory=yc-hack-horses
 ConfigurationDirectory=yc-hack-horses
 Environment=DATA_DIR=/var/lib/yc-hack-horses
 Environment=LD_LIBRARY_PATH=/usr/lib64/yc-hack-horses
+# Миграции ставятся пакетом в /usr/share/yc-hack-horses/migrations
+Environment=MIGRATIONS_DIR=/usr/share/yc-hack-horses/migrations
 ExecStart=/usr/bin/yc-hack-horses --config /etc/yc-hack-horses/node.yaml
 Restart=on-failure
 RestartSec=5
