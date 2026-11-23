@@ -9,6 +9,13 @@ URL:            https://git.cu3rd.ru/cu3rd/yc-hack-horses
 ExclusiveArch:  x86_64
 AutoReqProv:    no
 
+# Явно фиксируем пути: rpm от Debian (act-24.04) не определяет юнит-каталог
+# (install в %install кладёт юнит в литеральный каталог с именем макроса, а
+# %files падает «File must begin with "/"»), а lib-каталог фиксируем, чтобы
+# пакет собирался одинаково на Debian-раннере и на EL.
+%global _unitdir        /usr/lib/systemd/system
+%global _libdir         /usr/lib64
+
 Source0:        node
 Source1:        node.example.yaml
 Source2:        libonnxruntime.so.1.31.1

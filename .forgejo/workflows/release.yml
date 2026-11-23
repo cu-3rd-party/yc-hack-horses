@@ -118,8 +118,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # beforePack (scripts/build-node.sh) кросс-компилирует loshid-node через go —
+      # в act-24.04 go нет, без setup-go electron-builder падает «go: command not found».
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false
       - name: Package Linux app
         working-directory: app
+        env:
+          # vite-сборка + electron-builder в контейнере 4g — ограничиваем heap node
+          # и убираем параллелизм, чтобы не ловить cgroup OOM.
+          NODE_OPTIONS: --max-old-space-size=2048
+          UV_THREADPOOL_SIZE: '2'
         run: |
           apt-get update && apt-get install -y --no-install-recommends fakeroot libarchive-tools
           npm ci --maxsockets=4
